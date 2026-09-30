@@ -19,38 +19,34 @@ describe('seeded source data', () => {
     }
   });
 
-  it('PIN 70153699 fixed costs match the source and are not approved', async () => {
-    const rows = await q(
-      `SELECT i.name, i.source_amount, i.approved_amount FROM budget_items i JOIN budget_categories c ON c.id = i.category_id
+  it('PIN 70153699 budget has fixed costs + 16 finishing categories with every amount blank (Needs confirmation)', async () => {
+    const cats = await q('SELECT name, kind FROM budget_categories WHERE project_id = $1 ORDER BY sort_order', [ctx.projects.p1]);
+    expect(cats).toHaveLength(17);
+    expect(cats[0]).toEqual({ name: 'Fixed Costs', kind: 'fixed' });
+    const fixed = await q(
+      `SELECT i.name, i.approved_amount FROM budget_items i JOIN budget_categories c ON c.id = i.category_id
         WHERE i.project_id = $1 AND c.kind = 'fixed' ORDER BY i.sort_order`, [ctx.projects.p1]);
-    expect(rows).toEqual([
-      { name: 'Contractor Cost', source_amount: 509500, approved_amount: null },
-      { name: 'Consultant Cost', source_amount: 28000, approved_amount: null },
-      { name: 'Kahramaa Cost', source_amount: 35000, approved_amount: null },
+    expect(fixed).toEqual([
+      { name: 'Contractor Cost', approved_amount: null },
+      { name: 'Consultant Cost', approved_amount: null },
+      { name: 'Kahramaa Cost', approved_amount: null },
     ]);
   });
 
-  it('PIN 70153699 category estimates match Variant A / B, with unpriced B left blank', async () => {
-    const rows = await q(
-      `SELECT c.name, i.source_variant_a a, i.source_variant_b b, i.source_status FROM budget_items i JOIN budget_categories c ON c.id = i.category_id
-        WHERE i.project_id = $1 AND c.kind = 'finishing' ORDER BY c.sort_order`, [ctx.projects.p1]);
-    expect(rows).toHaveLength(16);
-    const sumA = rows.reduce((s, r) => s + Math.round(r.a * 100), 0) / 100;
-    const sumB = rows.reduce((s, r) => s + Math.round((r.b ?? 0) * 100), 0) / 100;
-    expect(sumA).toBe(628586.5);
-    expect(sumB).toBe(473106.8);
-    expect(rows.find((r) => r.name === 'Floor')).toMatchObject({ a: 129030.2, b: 35611 });
-    for (const n of ['Landscape', 'Insulation', 'Foam / Cladding']) {
-      expect(rows.find((r) => r.name === n)).toMatchObject({ b: null, source_status: 'Variant B: Not priced' });
-    }
+  it('seeds no estimate / variant amounts or source summary figures', async () => {
+    expect(await q('SELECT 1 FROM budget_items WHERE source_amount IS NOT NULL OR source_variant_a IS NOT NULL OR source_variant_b IS NOT NULL')).toHaveLength(0);
+    expect(await q('SELECT 1 FROM source_references')).toHaveLength(0);
+    expect(await q(`SELECT 1 FROM budget_items WHERE name ILIKE '%variant%' OR notes ILIKE '%variant%' OR source_status ILIKE '%variant%'`)).toHaveLength(0);
+    expect(await q(`SELECT 1 FROM budget_categories WHERE name ILIKE '%variant%' OR notes ILIKE '%variant%'`)).toHaveLength(0);
   });
 
-  it('summary figures are preserved as source references flagged Needs review', async () => {
-    const rows = await q('SELECT label, variant_a_value a, variant_b_value b, review_status FROM source_references WHERE project_id = $1 ORDER BY sort_order', [ctx.projects.p1]);
-    expect(rows).toHaveLength(7);
-    expect(rows.every((r) => r.review_status === 'Needs review')).toBe(true);
-    expect(rows.find((r) => r.label === 'Grand total shown')).toMatchObject({ a: 1798000.65, b: 1864060 });
-    expect(rows.find((r) => r.label === 'Installation 15%')).toMatchObject({ a: null, b: 172673.2 });
+  it('material lines are grouped by 15 managed material categories in source order', async () => {
+    const cats = await q('SELECT name FROM material_categories WHERE project_id = $1 ORDER BY sort_order', [ctx.projects.p1]);
+    expect(cats.map((c) => c.name)[0]).toBe('Tiles, Ceramic & Marble');
+    expect(cats).toHaveLength(15);
+    expect(await q('SELECT 1 FROM material_items WHERE category_id IS NULL')).toHaveLength(0);
+    expect(await q('SELECT 1 FROM material_scope_notes WHERE category_id IS NULL')).toHaveLength(0);
+    expect(await q('SELECT 1 FROM material_categories WHERE project_id = $1', [ctx.projects.p2])).toHaveLength(0);
   });
 
   it('no approvals, payments, visits, uploads, work updates or completions are seeded', async () => {
@@ -120,7 +116,7 @@ describe('seeded source data', () => {
 
   it('PIN 70153016 has structure only — no values, materials or records copied', async () => {
     const p2 = ctx.projects.p2;
-    expect(await q(`SELECT 1 FROM budget_items WHERE project_id = $1 AND (source_amount IS NOT NULL OR source_variant_a IS NOT NULL OR source_variant_b IS NOT NULL OR approved_amount IS NOT NULL OR quantity IS NOT NULL)`, [p2])).toHaveLength(0);
+    expect(await q(`SELECT 1 FROM budget_items WHERE project_id = $1 AND (approved_amount IS NOT NULL OR quantity IS NOT NULL)`, [p2])).toHaveLength(0);
     expect(await q('SELECT 1 FROM material_items WHERE project_id = $1', [p2])).toHaveLength(0);
     expect(await q('SELECT 1 FROM material_scope_notes WHERE project_id = $1', [p2])).toHaveLength(0);
     expect(await q('SELECT 1 FROM source_references WHERE project_id = $1', [p2])).toHaveLength(0);

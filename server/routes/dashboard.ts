@@ -166,9 +166,11 @@ export function dashboardRoutes(pool: pg.Pool, timeZone: string) {
     assertCap(req, 'budget.read');
     const b = await loadBudget(pool, req.project!.id);
     const cat = new Map(b.categories.map((c) => [c.id, c]));
+    const order = new Map(b.categories.map((c, idx) => [c.id, idx]));
+    const items = [...b.items].sort((x, y) => (order.get(x.category_id) ?? 0) - (order.get(y.category_id) ?? 0) || x.sort_order - y.sort_order);
     sendCsv(res, `budget-${safeCode(req.project!.code)}.csv`,
-      ['Category', 'Kind', 'Item', 'Source amount', 'Variant A – Individual (ref)', 'Variant B – Al Wathab (ref)', 'Source status', 'Approved amount', 'Scheduled payments', 'Paid', 'Source', 'Notes', 'Archived'],
-      b.items.map((i) => [cat.get(i.category_id)?.name, cat.get(i.category_id)?.kind, i.name, i.source_amount, i.source_variant_a, i.source_variant_b, i.source_status, i.approved_amount ?? 'Needs confirmation', i.scheduled_amount, i.paid_amount, i.source_label, i.notes, i.archived_at ? 'yes' : '']));
+      ['Category', 'Kind', 'Item', 'Approved / Finalized Amount (QAR)', 'Scheduled payments (QAR)', 'Paid (QAR)', 'Source label', 'Notes', 'Archived'],
+      items.map((i) => [cat.get(i.category_id)?.name, cat.get(i.category_id)?.kind, i.name, i.approved_amount ?? 'Needs confirmation', i.scheduled_amount, i.paid_amount, i.source_label, i.notes, i.archived_at || cat.get(i.category_id)?.archived_at ? 'yes' : '']));
   });
 
   return r;

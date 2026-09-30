@@ -81,12 +81,11 @@ export const ATTACHMENT_KIND_LABELS: Record<(typeof ATTACHMENT_KINDS)[number], s
   supporting_document: 'Supporting document',
 };
 
-export const MISC_BASES = ['approved_finishing', 'variant_a_finishing', 'variant_b_finishing'] as const;
+// The miscellaneous allowance is only ever calculated on approved / finalized amounts.
+export const MISC_BASES = ['approved_finishing'] as const;
 export type MiscBasis = (typeof MISC_BASES)[number];
 export const MISC_BASIS_LABELS: Record<MiscBasis, string> = {
-  approved_finishing: 'Approved amounts of finishing categories (included in misc basis)',
-  variant_a_finishing: 'Variant A source estimates of finishing categories (reference only)',
-  variant_b_finishing: 'Variant B source estimates of finishing categories (reference only)',
+  approved_finishing: 'Approved / finalized amounts of finishing categories included in the misc basis',
 };
 
 export const NEEDS_CONFIRMATION = 'Needs confirmation';

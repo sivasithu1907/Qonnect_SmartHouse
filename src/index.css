@@ -31,3 +31,29 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
+
+/* Empty-field placeholders: consistently light grey but still readable.
+   Only placeholder text is affected — entered values, labels and help text keep their colours. */
+@layer base {
+  input::placeholder,
+  textarea::placeholder {
+    color: #94a3b8; /* slate-400 */
+    opacity: 1;
+  }
+  /* empty date / date-time fields show their mm/dd/yyyy hint in the same grey */
+  input[data-empty='true']:not(:focus)::-webkit-datetime-edit {
+    color: #94a3b8;
+  }
+  input[type='date'][data-empty='true']:not(:focus),
+  input[type='datetime-local'][data-empty='true']:not(:focus) {
+    color: #94a3b8;
+  }
+  /* a select still showing its empty choice ("— None —", "— Not set —") */
+  select[data-empty='true'] {
+    color: #94a3b8;
+  }
+  select option,
+  select optgroup {
+    color: #0f172a; /* list items keep normal contrast */
+  }
+}

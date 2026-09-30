@@ -8,14 +8,18 @@ import { formatDate, formatDateTime } from '../lib/format';
 import { CONSULTANT_VISIT_STATUSES } from '../../shared/constants';
 import { Attachments } from '../components/Attachments';
 import { VisitActions } from '../components/VisitActions';
-import { Badge, Button, Card, EmptyState, LinkButton, Modal, Notice, PageHeader, RecordForm, Spinner, StatusBadge, useUi, type FieldSpec } from '../components/ui';
+import { Badge, Button, Card, EmptyState, LinkButton, Modal, Notice, PageHeader, RecordForm, Spinner, StatusBadge, useUi, type FieldSpec, type Option } from '../components/ui';
+import { labelOf, materialOptions as materialOpts, timelineTaskOptions } from '../lib/options';
 
 export function useLinkOptions(projectId: string) {
   const { data: tl } = useApi<{ phases: Phase[]; tasks: Task[] }>(`/api/projects/${projectId}/timeline`);
   const { data: mats } = useApi<{ items: MaterialItem[] }>(`/api/projects/${projectId}/materials`);
-  const taskOptions = (tl?.tasks ?? []).map((t) => ({ value: t.id, label: `${tl!.phases.find((p) => p.id === t.phase_id)?.seq ?? ''}. ${t.name}` }));
-  const materialOptions = (mats?.items ?? []).map((m) => ({ value: m.id, label: `${m.category} · ${m.description}` }));
-  const label = (opts: Array<{ value: string; label: string }>, id: string | null) => (id ? opts.find((o) => o.value === id)?.label ?? '' : '');
+  const taskOptions = timelineTaskOptions(tl?.phases ?? [], tl?.tasks ?? []);
+  const materialOptions = materialOpts(mats?.items ?? []);
+  const label = (opts: Option[], id: string | null) => {
+    const o = opts.find((x) => x.value === id);
+    return o ? (o.group && opts === materialOptions ? `${o.group} · ${o.label}` : labelOf(opts, id)) : '';
+  };
   return { taskOptions, materialOptions, label };
 }
 
@@ -44,8 +48,8 @@ export function ConsultantVisits({ project }: { project: Project }) {
     { name: 'observations', label: 'Observations / findings', type: 'textarea' },
     { name: 'instructions', label: 'Instructions issued', type: 'textarea' },
     { name: 'next_visit_date', label: 'Next visit', type: 'date' },
-    { name: 'related_task_id', label: 'Related timeline task', type: 'select', nullable: true, options: taskOptions },
-    { name: 'related_material_id', label: 'Related material line', type: 'select', nullable: true, options: materialOptions, wide: true },
+    { name: 'related_task_id', label: 'Related timeline task', type: 'searchselect', nullable: true, options: taskOptions, wide: true, help: 'Ordered by timeline sequence (phase.task). Type to search by task or phase.' },
+    { name: 'related_material_id', label: 'Related material line', type: 'searchselect', nullable: true, options: materialOptions, wide: true },
     { name: 'notes', label: 'Notes', type: 'textarea' },
   ];
 

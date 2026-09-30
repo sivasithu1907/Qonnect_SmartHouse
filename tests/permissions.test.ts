@@ -34,7 +34,8 @@ describe('role permissions (server-enforced)', () => {
     const b = await pm.get(P + '/budget');
     expect(b.status).toBe(200);
     expect((await pm.patch(`${P}/budget/items/${b.body.items[0].id}`, { approved_amount: 1 })).status).toBe(403);
-    expect((await pm.post(`${P}/budget/categories`, { name: 'X' })).status).toBe(403);
+    expect((await pm.post(`${P}/categories/budget`, { name: 'X' })).status).toBe(403);
+    expect((await pm.post(`${P}/categories/material`, { name: 'X' })).status).toBe(403);
     expect((await pm.patch(`${P}/settings`, { misc_percentage: 12 })).status).toBe(403);
     expect((await pm.patch(P, { name: 'Renamed' })).status).toBe(403);
     expect((await pm.post(`${P}/archive`)).status).toBe(403);

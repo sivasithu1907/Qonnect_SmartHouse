@@ -22,13 +22,14 @@ export type Capability =
   | 'timeline.read'
   | 'timeline.write'
   | 'workupdates.write'
-  | 'audit.read';
+  | 'audit.read'
+  | 'categories.manage';   // add / rename / reorder / archive / delete budget and material categories
 
 const MATRIX: Record<Role, Capability[]> = {
   admin: [
     'projects.manage', 'users.manage', 'links.edit', 'budget.read', 'budget.write', 'payments.read', 'payments.write',
     'materials.read', 'materials.write', 'consultant.read', 'consultant.write', 'site.read', 'site.write',
-    'timeline.read', 'timeline.write', 'workupdates.write', 'audit.read',
+    'timeline.read', 'timeline.write', 'workupdates.write', 'audit.read', 'categories.manage',
   ],
   project_manager: [
     'links.edit', 'budget.read', 'payments.read', 'payments.write', 'materials.read', 'materials.write',

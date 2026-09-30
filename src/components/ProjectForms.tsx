@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { patch, post } from '../lib/api';
 import type { Project } from '../lib/types';
 import { useSession } from '../lib/session';
-import { MISC_BASES, MISC_BASIS_LABELS } from '../../shared/constants';
 import { Button, Modal, Notice, RecordForm, Tabs, useUi, type FieldSpec } from './ui';
 import { formatDateTime, formatQAR } from '../lib/format';
 
@@ -89,12 +88,11 @@ export function ProjectSettingsModal({ open, project, onClose, onSaved }: { open
           <div className="text-xs text-slate-600 mb-3 space-y-1">
             <p>Control budget: {project.control_budget === null ? <b className="text-amber-700">Needs confirmation</b> : <b>{formatQAR(project.control_budget)}</b>}
               {project.control_budget_confirmed ? ` — confirmed ${formatDateTime(project.control_budget_confirmed_at)}` : project.control_budget !== null ? ' — not confirmed' : ''}</p>
-            <p>The source dashboard grand totals are references only and are not used as the control budget.</p>
+            <p>The misc allowance is calculated only on approved / finalized amounts of finishing categories. Budget comparisons are kept in the linked Google Sheet.</p>
           </div>
           <RecordForm key={`b-${project.id}`}
             fields={[
               { name: 'misc_percentage', label: 'Miscellaneous allowance %', type: 'number', required: true },
-              { name: 'misc_basis', label: 'Misc allowance basis', type: 'select', options: MISC_BASES.map((b) => ({ value: b, label: MISC_BASIS_LABELS[b] })), wide: true, help: 'Fixed costs (Contractor, Consultant, Kahramaa) are never included.' },
               { name: 'control_budget', label: 'Control budget (QAR)', type: 'money', help: 'Leave blank until the owner confirms it.' },
               { name: 'control_budget_confirmed', label: 'Owner has confirmed this control budget', type: 'checkbox' },
             ]}

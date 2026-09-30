@@ -65,6 +65,7 @@ No passwords, tokens or private URLs are stored in the code.
 | Manage users and project assignments | ✔ | | | | |
 | Edit project Drive / Sheets links | ✔ | ✔ | | | |
 | Budget (master items) — read | ✔ | ✔ | | | ✔ |
+| Manage budget / material categories | ✔ | | | | |
 | Budget — edit, approve amounts | ✔ | | | | |
 | Payments — read | ✔ | ✔ | | | ✔ |
 | Payments — create / edit / void transfers, upload slips | ✔ | ✔ | | | |
@@ -100,7 +101,7 @@ Drive folders (project, payments, materials, consultant reports, site visits) an
 
 `npm run db:seed` (or `node dist-server/seed.js` in the container) creates, only if the code does not exist yet:
 
-- **Umm Garn — PIN 70153699** (existing project): fixed costs (Contractor 509,500.00; Consultant 28,000.00; Kahramaa 35,000.00), 16 Master Sheet categories with Variant A / Variant B reference estimates (Landscape, Insulation, Foam/Cladding: Variant B *Not priced*), the source dashboard summary figures as *Needs review* references, 40 material supply lines + 7 category scope notes, and the 20-phase timeline template. All approved amounts blank, all material statuses *Status not confirmed*, only the four tile/marble lines carry the 10 Oct 2026 supply due date, gypsum shows *Contractor confirmation required*.
+- **Umm Garn — PIN 70153699** (existing project): budget categories (Fixed Costs + 16 finishing categories) with every **Approved / Finalized Amount** blank (*Needs confirmation*), 40 material supply lines in 15 managed material categories with 7 scope notes, and the 20-phase timeline template. All material statuses *Status not confirmed*; only the four tile/marble lines carry the 10 Oct 2026 supply due date; gypsum shows *Contractor confirmation required*. Budget comparisons are kept in the project's linked Google Sheet, not in the app.
 - **Umm Garn — PIN 70153016** (new project): budget category/item names and the timeline template only — no prices, quantities, materials, payments, dates, visits or progress.
 
 No payments, visits, uploads, suppliers, approvals or completions are seeded. There are no KNX items.

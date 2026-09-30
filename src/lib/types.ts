@@ -6,25 +6,26 @@ export interface Member { id: string; name: string; role: Role }
 export interface Project {
   id: string; code: string; name: string; location: string; description: string; client: string; status: string;
   planned_start_date: string | null; target_completion_date: string | null;
-  misc_percentage: number; misc_basis: 'approved_finishing' | 'variant_a_finishing' | 'variant_b_finishing';
+  misc_percentage: number; misc_basis: 'approved_finishing';
   control_budget: number | null; control_budget_confirmed: boolean; control_budget_confirmed_at: string | null;
   drive_folder_url: string; sheets_url: string; payments_drive_url: string; materials_drive_url: string;
   consultant_drive_url: string; site_visits_drive_url: string; notes: string; archived_at: string | null;
 }
 
-export interface BudgetCategory { id: string; name: string; kind: 'finishing' | 'fixed' | 'other'; include_in_misc_basis: boolean; sort_order: number; source_label: string; notes: string; archived_at: string | null }
+export interface BudgetCategory { id: string; name: string; kind: 'finishing' | 'fixed' | 'other'; include_in_misc_basis: boolean; sort_order: number; source_label: string; notes: string; archived_at: string | null; usage_count?: number; active_count?: number }
+export interface MaterialCategory { id: string; name: string; sort_order: number; archived_at: string | null; usage_count?: number; active_count?: number }
+export interface CategoriesResponse { budget: BudgetCategory[]; material: MaterialCategory[] }
 export interface BudgetItem {
   id: string; category_id: string; name: string; description: string; quantity: number | null; unit: string;
-  source_amount: number | null; source_variant_a: number | null; source_variant_b: number | null; source_status: string; source_label: string;
+  source_label: string;
   approved_amount: number | null; approved_at: string | null; notes: string; sort_order: number; archived_at: string | null;
   paid_amount: number; scheduled_amount: number;
 }
-export interface SourceReference { id: string; label: string; variant_a_value: number | null; variant_b_value: number | null; review_status: string; note: string; source_label: string }
 export interface MiscAllowance { basis: string; percentage: number; basisAmount: number; allowance: number; itemsCounted: number; itemsMissingValue: number }
-export interface CategorySummary { id: string; name: string; kind: string; source_amount: number | null; source_variant_a: number | null; source_variant_b: number | null; approved: number | null; scheduled: number; paid: number }
+export interface CategorySummary { id: string; name: string; kind: string; approved: number | null; scheduled: number; paid: number; itemCount: number; approvedItemCount: number }
 export interface BudgetResponse {
-  categories: BudgetCategory[]; items: BudgetItem[]; references: SourceReference[];
-  summary: { byCategory: CategorySummary[]; misc: MiscAllowance; approvedCommitments: number; approvedItemCount: number; itemCount: number; fixedSourceSubtotal: number };
+  categories: BudgetCategory[]; items: BudgetItem[];
+  summary: { byCategory: CategorySummary[]; misc: MiscAllowance; approvedCommitments: number; approvedItemCount: number; itemCount: number; scheduled: number; paid: number };
 }
 
 export interface PaymentTransaction { id: string; milestone_id: string; amount: number; paid_date: string; method: string; reference: string; notes: string; archived_at: string | null; attachment_count: number }
@@ -41,7 +42,7 @@ export interface PaymentsResponse {
 }
 
 export interface MaterialItem {
-  id: string; category: string; description: string; quantity: number | null; unit: string; amount: number | null;
+  id: string; category: string; category_id: string; category_sort: number | null; category_archived_at: string | null; description: string; quantity: number | null; unit: string; amount: number | null;
   supply_responsibility: 'owner' | 'contractor' | 'needs_confirmation'; responsibility_note: string; vendor: string;
   assigned_contractor_id: string | null; assigned_contractor_name: string | null; status: string;
   required_on_site_date: string | null; planned_delivery_date: string | null; confirmed_delivery_date: string | null;
@@ -49,7 +50,7 @@ export interface MaterialItem {
   qty_ordered: number | null; qty_delivered: number | null; inspection_status: string; next_follow_up_date: string | null;
   document_url: string; notes: string; source_label: string; is_package: boolean; archived_at: string | null; attachment_count: number;
 }
-export interface ScopeNote { id: string; category: string; owner_supply: string; contractor_scope: string; source_label: string }
+export interface ScopeNote { id: string; category: string; category_id: string; owner_supply: string; contractor_scope: string; source_label: string }
 
 export interface VisitAction { id: string; visit_id: string; description: string; responsible: string; due_date: string | null; status: 'Open' | 'Closed' }
 export interface ConsultantVisit {

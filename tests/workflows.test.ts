@@ -16,7 +16,7 @@ describe('projects', () => {
     expect(r.body.misc_percentage).toBe(10);
     const b = await admin.get(`/api/projects/${newId}/budget`);
     expect(b.body.items.length).toBe(19);
-    expect(b.body.items.every((i: Record<string, unknown>) => i.source_variant_a === null && i.approved_amount === null && i.source_amount === null)).toBe(true);
+    expect(b.body.items.every((i: Record<string, unknown>) => i.approved_amount === null)).toBe(true);
     const t = await admin.get(`/api/projects/${newId}/timeline`);
     expect(t.body.phases).toHaveLength(20);
   });
@@ -41,12 +41,18 @@ describe('projects', () => {
     expect(a.body.map((x: { action: string }) => x.action)).toEqual(expect.arrayContaining(['create', 'update', 'archive', 'restore']));
   });
 
-  it('misc percentage is editable per project and the basis is explicit', async () => {
-    const r = await admin.patch(`${P}/settings`, { misc_percentage: 12.5, misc_basis: 'variant_a_finishing' });
+  it('misc percentage is editable per project and only uses approved / finalized amounts', async () => {
+    expect((await admin.patch(`${P}/settings`, { misc_basis: 'variant_a_finishing' })).status).toBe(400);
+    const r = await admin.patch(`${P}/settings`, { misc_percentage: 12.5 });
     expect(r.status).toBe(200);
     const b = await admin.get(`${P}/budget`);
-    expect(b.body.summary.misc).toMatchObject({ percentage: 12.5, basisAmount: 628586.5, allowance: 78573.31 });
-    await admin.patch(`${P}/settings`, { misc_percentage: 10, misc_basis: 'approved_finishing' });
+    expect(b.body.summary.misc).toMatchObject({ basis: 'approved_finishing', percentage: 12.5, basisAmount: 0, allowance: 0, itemsCounted: 0 });
+    const floor = b.body.items.find((i: { name: string }) => i.name === 'Floor');
+    await admin.patch(`${P}/budget/items/${floor.id}`, { approved_amount: 1000 });
+    const b1 = await admin.get(`${P}/budget`);
+    expect(b1.body.summary.misc).toMatchObject({ basisAmount: 1000, allowance: 125, itemsCounted: 1 });
+    await admin.patch(`${P}/budget/items/${floor.id}`, { approved_amount: null });
+    await admin.patch(`${P}/settings`, { misc_percentage: 10 });
     const b2 = await admin.get(`${P}/budget`);
     expect(b2.body.summary.misc).toMatchObject({ basisAmount: 0, allowance: 0, itemsCounted: 0 });
     // other project unaffected
@@ -64,11 +70,12 @@ describe('projects', () => {
 });
 
 describe('budget', () => {
-  it('approving an amount is stored separately from the source value and audited; no payment is created', async () => {
+  it('entering an approved / finalized amount is audited and never creates a payment', async () => {
     const b = await admin.get(`${P}/budget`);
     const floor = b.body.items.find((i: { name: string }) => i.name.startsWith('Floor'));
+    expect(floor.approved_amount).toBeNull();
     const r = await admin.patch(`${P}/budget/items/${floor.id}`, { approved_amount: 100000 });
-    expect(r.body).toMatchObject({ approved_amount: 100000, source_variant_a: 129030.2, source_variant_b: 35611 });
+    expect(r.body.approved_amount).toBe(100000);
     expect(r.body.approved_by).toBe(ctx.users.admin);
     const pay = await admin.get(`${P}/payments`);
     expect(pay.body.totals.paid).toBe(0);
@@ -80,13 +87,22 @@ describe('budget', () => {
     await admin.patch(`${P}/budget/items/${floor.id}`, { approved_amount: null });
   });
 
-  it('editing a fixed cost source amount does not mark it paid', async () => {
+  it('budget API, summary and CSV expose no variant / estimate amounts; legacy estimate fields are ignored', async () => {
     const b = await admin.get(`${P}/budget`);
+    const text = JSON.stringify(b.body);
+    expect(text).not.toMatch(/variant|source_amount|source_status|references/i);
     const k = b.body.items.find((i: { name: string }) => i.name === 'Kahramaa Cost');
-    const r = await admin.patch(`${P}/budget/items/${k.id}`, { source_amount: 36000 });
-    expect(r.body).toMatchObject({ source_amount: 36000, approved_amount: null });
-    expect((await admin.get(`${P}/budget`)).body.items.find((i: { id: string }) => i.id === k.id).paid_amount).toBe(0);
-    await admin.patch(`${P}/budget/items/${k.id}`, { source_amount: 35000 });
+    const r = await admin.patch(`${P}/budget/items/${k.id}`, { source_amount: 36000, source_variant_a: 1 });
+    expect(r.status).toBe(200);
+    expect(r.body.approved_amount).toBeNull();
+    expect(JSON.stringify(r.body)).not.toMatch(/variant|source_amount/i);
+    const row = (await ctx.pool.query('SELECT source_amount, source_variant_a FROM budget_items WHERE id = $1', [k.id])).rows[0];
+    expect(row).toEqual({ source_amount: null, source_variant_a: null });
+    const csv = await admin.get(`${P}/reports/budget.csv`);
+    expect(csv.text).toContain('Approved / Finalized Amount (QAR)');
+    expect(csv.text).not.toMatch(/variant/i);
+    const d = await admin.get(`${P}/dashboard`);
+    expect(JSON.stringify(d.body)).not.toMatch(/variant|source_amount/i);
   });
 
   it('PATCH never resets fields that were not sent', async () => {
@@ -98,15 +114,17 @@ describe('budget', () => {
   });
 
   it('adds, edits, archives and restores categories and items', async () => {
-    const c = await admin.post(`${P}/budget/categories`, { name: 'Swimming pool', kind: 'finishing' });
+    const c = await admin.post(`${P}/categories/budget`, { name: 'Swimming pool', kind: 'finishing' });
     expect(c.status).toBe(201);
     const i = await admin.post(`${P}/budget/items`, { category_id: c.body.id, name: 'Pool shell', notes: 'Owner request' });
     expect(i.status).toBe(201);
     expect(i.body.approved_amount).toBeNull();
-    expect((await admin.patch(`${P}/budget/categories/${c.body.id}`, { name: 'Pool' })).body.name).toBe('Pool');
+    expect((await admin.patch(`${P}/categories/budget/${c.body.id}`, { name: 'Pool' })).body.name).toBe('Pool');
     expect((await admin.post(`${P}/budget/items/${i.body.id}/archive`)).body.archived_at).toBeTruthy();
     expect((await admin.post(`${P}/budget/items/${i.body.id}/restore`)).body.archived_at).toBeNull();
-    expect((await admin.post(`${P}/budget/categories/${c.body.id}/archive`)).body.archived_at).toBeTruthy();
+    expect((await admin.post(`${P}/categories/budget/${c.body.id}/archive`)).body.archived_at).toBeTruthy();
+    // archived categories cannot take new items
+    expect((await admin.post(`${P}/budget/items`, { category_id: c.body.id, name: 'Pool pump' })).status).toBe(400);
     // category from another project cannot be used
     const b2 = await admin.get(`/api/projects/${ctx.projects.p2}/budget`);
     expect((await admin.post(`${P}/budget/items`, { category_id: b2.body.categories[0].id, name: 'x' })).status).toBe(400);
@@ -123,7 +141,11 @@ describe('budget', () => {
 describe('materials', () => {
   it('creates and edits a line; delivery date changes are audited', async () => {
     const pm = await ctx.agent('pm');
-    const r = await pm.post(`${P}/materials`, { category: 'Windows & Doors', description: 'Front door hardware' });
+    const cats = (await pm.get(`${P}/categories`)).body.material;
+    const wd = cats.find((c: { name: string }) => c.name === 'Windows & Doors');
+    expect((await pm.post(`${P}/materials`, { category: 'Windows & Doors', description: 'Free text is no longer accepted' })).status).toBe(400);
+    const r = await pm.post(`${P}/materials`, { category_id: wd.id, description: 'Front door hardware' });
+    expect(r.body.category).toBe('Windows & Doors');
     expect(r.status).toBe(201);
     expect(r.body).toMatchObject({ status: 'Status not confirmed', supply_responsibility: 'needs_confirmation' });
     const u = await pm.patch(`${P}/materials/${r.body.id}`, { revised_delivery_date: '2026-11-20', status: 'Delayed' });

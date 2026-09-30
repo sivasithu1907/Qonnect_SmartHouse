@@ -84,8 +84,6 @@ export interface BudgetCategoryInput {
 export interface BudgetItemInput {
   category_id: string;
   approved_amount: number | string | null;
-  source_variant_a: number | string | null;
-  source_variant_b: number | string | null;
   archived_at?: string | null;
 }
 
@@ -95,29 +93,28 @@ export interface MiscAllowance {
   basisAmount: number;
   allowance: number;
   itemsCounted: number;
-  itemsMissingValue: number; // items in the basis that have no value for the chosen basis
+  itemsMissingValue: number; // items in the basis that have no approved / finalized amount yet
 }
 
 /**
- * Miscellaneous allowance = percentage × subtotal of *finishing* categories that
- * are flagged include_in_misc_basis. Fixed costs are never part of the basis.
+ * Miscellaneous allowance = percentage × subtotal of APPROVED / FINALIZED amounts of
+ * finishing categories flagged include_in_misc_basis. Fixed costs are never part of the basis,
+ * and items without an approved amount contribute nothing.
  */
 export function miscAllowance(
   categories: BudgetCategoryInput[],
   items: BudgetItemInput[],
-  basis: MiscBasis,
   percentage: number | string,
 ): MiscAllowance {
   const eligible = new Set(
     categories.filter((c) => !c.archived_at && c.kind === 'finishing' && c.include_in_misc_basis).map((c) => c.id),
   );
-  const field = basis === 'approved_finishing' ? 'approved_amount' : basis === 'variant_a_finishing' ? 'source_variant_a' : 'source_variant_b';
   let basisC = 0;
   let counted = 0;
   let missing = 0;
   for (const it of items) {
     if (it.archived_at || !eligible.has(it.category_id)) continue;
-    const v = it[field];
+    const v = it.approved_amount;
     if (v === null || v === undefined || v === '') {
       missing++;
       continue;
@@ -127,7 +124,7 @@ export function miscAllowance(
   }
   const pct = Number(percentage) || 0;
   return {
-    basis,
+    basis: 'approved_finishing',
     percentage: pct,
     basisAmount: fromCents(basisC),
     allowance: fromCents(Math.round((basisC * pct) / 100)),

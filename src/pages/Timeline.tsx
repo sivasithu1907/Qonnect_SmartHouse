@@ -7,6 +7,7 @@ import type { MaterialItem, Phase, Project, Task, WorkUpdate } from '../lib/type
 import { formatDate, todayLocalISO } from '../lib/format';
 import { TASK_STATUSES } from '../../shared/constants';
 import { Attachments } from '../components/Attachments';
+import { labelOf, materialOptions, timelineTaskOptions } from '../lib/options';
 import { Badge, Button, Card, EmptyState, Modal, Notice, PageHeader, RecordForm, Spinner, StatusBadge, useUi, type FieldSpec } from '../components/ui';
 
 type Edit = { kind: 'task'; row: Task | null; phaseId?: string } | { kind: 'phase'; row: Phase | null } | { kind: 'update'; row: WorkUpdate | null };
@@ -29,7 +30,7 @@ export function Timeline({ project }: { project: Project }) {
   if (!data) return <Spinner />;
   const anyApproved = data.phases.some((p) => p.schedule_approved);
   const phaseOf = (t: Task) => data.phases.find((p) => p.id === t.phase_id);
-  const taskOptions = data.tasks.map((t) => ({ value: t.id, label: `${phaseOf(t)?.seq ?? ''}. ${t.name}` }));
+  const taskOptions = timelineTaskOptions(data.phases, data.tasks);
 
   const taskFields = (row: Task | null): FieldSpec[] => [
     { name: 'phase_id', label: 'Phase', type: 'select', required: true, options: data.phases.map((p) => ({ value: p.id, label: `${p.seq}. ${p.name}` })), wide: true },
@@ -42,7 +43,7 @@ export function Timeline({ project }: { project: Project }) {
     { name: 'planned_end', label: 'Planned finish', type: 'date' },
     { name: 'actual_start', label: 'Actual start', type: 'date' },
     { name: 'actual_end', label: 'Actual completion', type: 'date', help: 'Required to mark the task completed.' },
-    { name: 'depends_on', label: 'Depends on (predecessors) — hold Ctrl/Cmd to select several', type: 'multiselect', options: taskOptions.filter((o) => o.value !== row?.id) },
+    { name: 'depends_on', label: 'Depends on (predecessors) — hold Ctrl/Cmd to select several', type: 'multiselect', options: timelineTaskOptions(data.phases, data.tasks, { excludeId: row?.id }) },
     { name: 'notes', label: 'Notes', type: 'textarea' },
   ];
 
@@ -150,7 +151,7 @@ export function Timeline({ project }: { project: Project }) {
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <div className="text-xs font-semibold text-slate-900">{u.title}</div>
-                      <div className="text-[11px] text-slate-500">{formatDate(u.update_date)} · {u.author_name ?? '—'}{u.related_task_id && ` · ${taskById.get(u.related_task_id)?.name ?? ''}`}</div>
+                      <div className="text-[11px] text-slate-500">{formatDate(u.update_date)} · {u.author_name ?? '—'}{u.related_task_id && ` · ${labelOf(taskOptions, u.related_task_id)}`}</div>
                     </div>
                     <div className="flex gap-1">
                       <Button size="sm" variant="ghost" onClick={() => setFilesFor(filesFor === u.id ? null : u.id)}><Paperclip className="w-3.5 h-3.5" />{u.attachment_count}</Button>
@@ -196,8 +197,8 @@ export function Timeline({ project }: { project: Project }) {
               { name: 'update_date', label: 'Date', type: 'date', required: true },
               { name: 'title', label: 'Title', required: true },
               { name: 'description', label: 'Details', type: 'textarea' },
-              { name: 'related_task_id', label: 'Related task', type: 'select', nullable: true, options: taskOptions },
-              { name: 'related_material_id', label: 'Related material', type: 'select', nullable: true, options: (mats?.items ?? []).map((m) => ({ value: m.id, label: `${m.category} · ${m.description}` })) },
+              { name: 'related_task_id', label: 'Related timeline task', type: 'searchselect', nullable: true, options: taskOptions, wide: true, help: 'Ordered by timeline sequence (phase.task). Type to search by task or phase.' },
+              { name: 'related_material_id', label: 'Related material line', type: 'searchselect', nullable: true, options: materialOptions(mats?.items ?? []), wide: true },
             ]}
             onCancel={() => setEdit(null)}
             onSubmit={async (v) => {

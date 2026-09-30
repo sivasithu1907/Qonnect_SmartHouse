@@ -39,8 +39,8 @@ export function SiteVisits({ project }: { project: Project }) {
       { name: 'purpose', label: 'Purpose', required: true, wide: true },
       { name: 'areas', label: 'Areas / items to inspect', type: 'textarea' },
       { name: 'findings', label: 'Findings', type: 'textarea' },
-      { name: 'related_task_id', label: 'Related timeline task', type: 'select', nullable: true, options: taskOptions },
-      { name: 'related_material_id', label: 'Related material line', type: 'select', nullable: true, options: materialOptions },
+      { name: 'related_task_id', label: 'Related timeline task', type: 'searchselect', nullable: true, options: taskOptions, wide: true, help: 'Ordered by timeline sequence (phase.task). Type to search by task or phase.' },
+      { name: 'related_material_id', label: 'Related material line', type: 'searchselect', nullable: true, options: materialOptions, wide: true },
       { name: 'related_consultant_visit_id', label: 'Related consultant visit', type: 'select', nullable: true, options: cvOptions, wide: true },
       { name: 'notes', label: 'Notes', type: 'textarea' },
     ];

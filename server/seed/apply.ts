@@ -1,19 +1,19 @@
 import type pg from 'pg';
 import { FIXED_COST_ITEMS, FINISHING_CATEGORIES, TIMELINE_TEMPLATE } from './templates';
-import {
-  CATEGORY_ESTIMATES, FIXED_COSTS, MATERIALS, PROJECTS, SOURCE_DASHBOARD, SOURCE_MASTER_SHEET,
-  SOURCE_MATERIAL_TRACKER, SUMMARY_REFERENCES,
-} from './sourceData';
+import { MATERIALS, PROJECTS, SOURCE_MATERIAL_TRACKER } from './sourceData';
 import { audit } from '../audit';
 import { withTx } from '../db';
 
 type C = pg.PoolClient;
 
-/** Budget structure only: categories and one line per category, all values blank. */
+/**
+ * Budget structure only: categories and one line per category. Every approved / finalized
+ * amount is left blank (Needs confirmation) until an authorised admin enters it.
+ */
 export async function applyBudgetStructure(c: C, projectId: string) {
   const fixed = await c.query(
     `INSERT INTO budget_categories (project_id, name, kind, include_in_misc_basis, sort_order, notes)
-     VALUES ($1, 'Fixed Costs', 'fixed', false, 0, 'Template structure — amounts need confirmation') RETURNING id`,
+     VALUES ($1, 'Fixed Costs', 'fixed', false, 0, 'Approved / finalized amounts need confirmation.') RETURNING id`,
     [projectId],
   );
   let i = 0;
@@ -26,7 +26,7 @@ export async function applyBudgetStructure(c: C, projectId: string) {
   let s = 1;
   for (const name of FINISHING_CATEGORIES) {
     const cat = await c.query(
-      `INSERT INTO budget_categories (project_id, name, kind, sort_order, notes) VALUES ($1,$2,'finishing',$3,'Template structure — no values') RETURNING id`,
+      `INSERT INTO budget_categories (project_id, name, kind, sort_order) VALUES ($1,$2,'finishing',$3) RETURNING id`,
       [projectId, name, s++],
     );
     await c.query(`INSERT INTO budget_items (project_id, category_id, name, sort_order) VALUES ($1,$2,$3,0)`, [projectId, cat.rows[0].id, name]);
@@ -62,65 +62,33 @@ export async function applyTimelineTemplate(c: C, projectId: string) {
   }
 }
 
-/** Source-backed budget + material supply for PIN 70153699. */
+/**
+ * PIN 70153699: budget category structure (no amounts — comparisons live in the linked Google
+ * Sheet) and the owner-supplied material supply lines, grouped by managed material categories.
+ */
 export async function applySourceData(c: C, projectId: string) {
-  // Fixed costs
-  const fixed = await c.query(
-    `INSERT INTO budget_categories (project_id, name, kind, include_in_misc_basis, sort_order, source_label, notes)
-     VALUES ($1, 'Fixed Costs', 'fixed', false, 0, $2, 'Fixed cost subtotal shown in source: QAR 572,500.00. Editing an amount never creates a payment.')
-     RETURNING id`,
-    [projectId, SOURCE_DASHBOARD],
-  );
-  let i = 0;
-  for (const f of FIXED_COSTS) {
-    await c.query(
-      `INSERT INTO budget_items (project_id, category_id, name, source_amount, source_label, sort_order, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,'Source amount. Approved amount needs confirmation.')`,
-      [projectId, fixed.rows[0].id, f.name, f.amount, SOURCE_DASHBOARD, i++],
-    );
-  }
-  // Master sheet categories (reference estimates)
-  let s = 1;
-  for (const cat of CATEGORY_ESTIMATES) {
-    const row = await c.query(
-      `INSERT INTO budget_categories (project_id, name, kind, sort_order, source_label) VALUES ($1,$2,'finishing',$3,$4) RETURNING id`,
-      [projectId, cat.name, s++, SOURCE_MASTER_SHEET],
-    );
-    await c.query(
-      `INSERT INTO budget_items (project_id, category_id, name, source_variant_a, source_variant_b, source_status, source_label, notes, sort_order)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0)`,
-      [
-        projectId, row.rows[0].id, `${cat.name} (category estimate)`, cat.a, cat.b,
-        cat.b === null ? 'Variant B: Not priced' : '',
-        SOURCE_MASTER_SHEET,
-        'Variant A – Individual / Variant B – Al Wathab are reference estimates only, not approved commitments.',
-      ],
-    );
-  }
-  let r = 0;
-  for (const ref of SUMMARY_REFERENCES) {
-    await c.query(
-      `INSERT INTO source_references (project_id, label, variant_a_value, variant_b_value, note, source_label, sort_order)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      [projectId, ref.label, ref.a, ref.b, ref.note, SOURCE_DASHBOARD, r++],
-    );
-  }
-  // Material supply lines + scope notes
+  await applyBudgetStructure(c, projectId);
   let m = 0;
+  let order = 1;
   for (const g of MATERIALS) {
+    const cat = await c.query(
+      `INSERT INTO material_categories (project_id, name, sort_order) VALUES ($1,$2,$3) RETURNING id`,
+      [projectId, g.category, order++],
+    );
+    const categoryId = cat.rows[0].id;
     if (g.ownerSupply || g.contractorScope) {
       await c.query(
-        `INSERT INTO material_scope_notes (project_id, category, owner_supply, contractor_scope, source_label) VALUES ($1,$2,$3,$4,$5)`,
-        [projectId, g.category, g.ownerSupply ?? '', g.contractorScope ?? '', SOURCE_MATERIAL_TRACKER],
+        `INSERT INTO material_scope_notes (project_id, category, category_id, owner_supply, contractor_scope, source_label) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [projectId, g.category, categoryId, g.ownerSupply ?? '', g.contractorScope ?? '', SOURCE_MATERIAL_TRACKER],
       );
     }
     for (const item of g.items) {
       await c.query(
-        `INSERT INTO material_items (project_id, category, description, supply_responsibility, responsibility_note, status,
+        `INSERT INTO material_items (project_id, category, category_id, description, supply_responsibility, responsibility_note, status,
                                      required_on_site_date, delivery_date_note, is_package, source_label, sort_order)
-         VALUES ($1,$2,$3,$4,$5,'Status not confirmed',$6,$7,$8,$9,$10)`,
+         VALUES ($1,$2,$3,$4,$5,$6,'Status not confirmed',$7,$8,$9,$10,$11)`,
         [
-          projectId, g.category, item, g.responsibility, g.responsibilityNote ?? '',
+          projectId, g.category, categoryId, item, g.responsibility, g.responsibilityNote ?? '',
           g.requiredOnSite ?? null, g.deliveryDateNote ?? '', !!g.isPackage, SOURCE_MATERIAL_TRACKER, m++,
         ],
       );
@@ -147,7 +115,7 @@ export async function seedProjects(pool: pg.Pool, log: (m: string) => void = con
       await applyTimelineTemplate(c, id);
       await audit(c, null, {
         projectId: id, action: 'seed', entityType: 'project', entityId: id,
-        summary: p.seedSource ? 'Seeded source-backed budget and material supply lines' : 'Created clean workspace with standard structure',
+        summary: p.seedSource ? 'Seeded budget categories (no amounts) and source material supply lines' : 'Created clean workspace with standard structure',
       });
       log(`Created project ${p.name} — ${p.code}`);
     });

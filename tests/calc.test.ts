@@ -36,28 +36,29 @@ describe('milestoneBalance', () => {
   });
 });
 
-describe('miscAllowance', () => {
+describe('miscAllowance (approved / finalized amounts only)', () => {
   const cats = [
     { id: 'f', kind: 'fixed' as const, include_in_misc_basis: false },
     { id: 'a', kind: 'finishing' as const, include_in_misc_basis: true },
     { id: 'b', kind: 'finishing' as const, include_in_misc_basis: false },
   ];
   const items = [
-    { category_id: 'f', approved_amount: 500000, source_variant_a: null, source_variant_b: null },
-    { category_id: 'a', approved_amount: 1000, source_variant_a: 2000, source_variant_b: null },
-    { category_id: 'a', approved_amount: null, source_variant_a: 3000, source_variant_b: 50 },
-    { category_id: 'b', approved_amount: 9999, source_variant_a: 9999, source_variant_b: 9999 },
+    { category_id: 'f', approved_amount: 500000 },
+    { category_id: 'a', approved_amount: 1000 },
+    { category_id: 'a', approved_amount: null },
+    { category_id: 'b', approved_amount: 9999 },
   ];
-  it('never includes fixed costs or excluded categories', () => {
-    const r = miscAllowance(cats, items, 'approved_finishing', 10);
-    expect(r).toMatchObject({ basisAmount: 1000, allowance: 100, itemsCounted: 1, itemsMissingValue: 1 });
+  it('uses only finalized amounts of included finishing categories; never fixed costs', () => {
+    const r = miscAllowance(cats, items, 10);
+    expect(r).toMatchObject({ basis: 'approved_finishing', basisAmount: 1000, allowance: 100, itemsCounted: 1, itemsMissingValue: 1 });
   });
-  it('can use variant A reference as basis', () => {
-    expect(miscAllowance(cats, items, 'variant_a_finishing', 10).basisAmount).toBe(5000);
+  it('is zero when nothing is finalized yet', () => {
+    expect(miscAllowance(cats, [{ category_id: 'a', approved_amount: null }], 10)).toMatchObject({ basisAmount: 0, allowance: 0, itemsMissingValue: 1 });
   });
-  it('reproduces the source Misc 10% of Variant A finishing subtotal', () => {
-    const r = miscAllowance([{ id: 'x', kind: 'finishing', include_in_misc_basis: true }], [{ category_id: 'x', approved_amount: null, source_variant_a: 628586.5, source_variant_b: null }], 'variant_a_finishing', 10);
-    expect(r.allowance).toBe(62858.65);
+  it('ignores archived items and categories', () => {
+    const r = miscAllowance([{ ...cats[1], archived_at: '2026-01-01' }], [{ category_id: 'a', approved_amount: 500 }], 10);
+    expect(r.basisAmount).toBe(0);
+    expect(miscAllowance(cats, [{ category_id: 'a', approved_amount: 500, archived_at: '2026-01-01' }], 10).basisAmount).toBe(0);
   });
 });
 

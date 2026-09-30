@@ -142,27 +142,55 @@ export function LinkButton({ href, label, icon, emptyLabel = 'Link not set', ton
 }
 
 // ------------------------------------------------------------------ modal & confirm
+// Body scroll lock shared by nested dialogs (e.g. a confirm dialog over a form).
+let bodyLocks = 0;
+function lockBodyScroll() {
+  if (bodyLocks++ === 0) {
+    const gap = window.innerWidth - document.documentElement.clientWidth;
+    document.body.style.overflow = 'hidden';
+    if (gap > 0) document.body.style.paddingRight = `${gap}px`;
+  }
+}
+function unlockBodyScroll() {
+  if (bodyLocks > 0 && --bodyLocks === 0) {
+    document.body.style.overflow = '';
+    document.body.style.paddingRight = '';
+  }
+}
+
+/**
+ * Dialog that always fits the viewport: the title bar stays fixed, the content scrolls inside
+ * the dialog, and the page behind it cannot scroll while it is open. Forms rendered with
+ * RecordForm keep their Save / Cancel bar pinned to the bottom of the dialog.
+ */
 export function Modal({ open, title, onClose, children, wide, subtitle }: { open: boolean; title: string; subtitle?: string; onClose: () => void; children: React.ReactNode; wide?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    lockBodyScroll();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && closeRef.current();
     document.addEventListener('keydown', onKey);
-    ref.current?.querySelector<HTMLElement>('input,select,textarea,button')?.focus();
-    return () => document.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+    ref.current?.querySelector<HTMLElement>('[data-autofocus],input:not([type=hidden]),select,textarea,button:not([aria-label=Close])')?.focus();
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      unlockBodyScroll();
+    };
+  }, [open]);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-2 sm:p-6 bg-slate-900/40 backdrop-blur-[1px] overflow-y-auto" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={ref} role="dialog" aria-modal="true" aria-label={title} className={`w-full ${wide ? 'max-w-4xl' : 'max-w-xl'} bg-white rounded-2xl shadow-xl border border-slate-200 my-4`}>
-        <div className="flex items-start justify-between gap-3 px-5 pt-4 pb-3 border-b border-slate-100">
-          <div>
-            <h2 className="text-base font-bold text-slate-900">{title}</h2>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-6 bg-slate-900/40 backdrop-blur-[1px]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div ref={ref} role="dialog" aria-modal="true" aria-label={title}
+        className={`w-full ${wide ? 'max-w-4xl' : 'max-w-xl'} max-h-full flex flex-col bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden`}>
+        <div className="shrink-0 flex items-start justify-between gap-3 px-5 pt-4 pb-3 border-b border-slate-100">
+          <div className="min-w-0">
+            <h2 className="text-base font-bold text-slate-900 truncate">{title}</h2>
             {subtitle && <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>}
           </div>
           <button onClick={onClose} className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100" aria-label="Close"><X className="w-4 h-4" /></button>
         </div>
-        <div className="px-5 py-4">{children}</div>
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 pt-4 pb-4" data-modal-body>{children}</div>
       </div>
     </div>
   );
@@ -211,12 +239,13 @@ export function UiProvider({ children }: { children: React.ReactNode }) {
 }
 
 // ------------------------------------------------------------------ generic record form
-export type FieldType = 'password' | 'text' | 'textarea' | 'number' | 'money' | 'date' | 'datetime' | 'select' | 'checkbox' | 'url' | 'multiselect';
+export interface Option { value: string; label: string; group?: string }
+export type FieldType = 'searchselect' | 'password' | 'text' | 'textarea' | 'number' | 'money' | 'date' | 'datetime' | 'select' | 'checkbox' | 'url' | 'multiselect';
 export interface FieldSpec {
   name: string;
   label: string;
   type?: FieldType;
-  options?: Array<{ value: string; label: string }>;
+  options?: Option[];
   required?: boolean;
   help?: string;
   placeholder?: string;
@@ -242,8 +271,87 @@ function fromInput(f: FieldSpec, v: any): any {
   if (t === 'number' || t === 'money') return v === '' ? null : Number(v);
   if (t === 'date') return v === '' ? null : v;
   if (t === 'datetime') return fromLocalInput(v);
-  if (t === 'select' && f.nullable) return v === '' ? null : v;
+  if ((t === 'select' || t === 'searchselect') && f.nullable) return v === '' ? null : v;
   return typeof v === 'string' ? v.trim() : v;
+}
+
+/** Renders <option>s, grouped in <optgroup>s when options carry a group. */
+export function OptionList({ options }: { options: Option[] }) {
+  if (!options.some((o) => o.group)) return <>{options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</>;
+  const groups: Array<[string, Option[]]> = [];
+  for (const o of options) {
+    const g = o.group ?? '';
+    const last = groups[groups.length - 1];
+    if (last && last[0] === g) last[1].push(o); else groups.push([g, [o]]);
+  }
+  return <>{groups.map(([g, os]) => <optgroup key={g} label={g}>{os.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</optgroup>)}</>;
+}
+
+/**
+ * Searchable single-select. The list opens inline (inside scrolling dialogs it is never
+ * clipped); type to filter by label or group, arrow keys + Enter to choose, Escape to close.
+ */
+export function SearchSelect({ id, value, onChange, options, disabled, nullable, noneLabel = '— None —', searchPlaceholder = 'Type to search…' }: {
+  id?: string; value: string; onChange: (v: string) => void; options: Option[]; disabled?: boolean; nullable?: boolean; noneLabel?: string; searchPlaceholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const [active, setActive] = useState(0);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const selected = options.find((o) => o.value === value);
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const matches = options.filter((o) => {
+    const hay = `${o.label} ${o.group ?? ''}`.toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
+  const list: Option[] = nullable && !q ? [{ value: '', label: noneLabel }, ...matches] : matches;
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [open]);
+  useEffect(() => { setActive(0); }, [q, open]);
+  const choose = (v: string) => { onChange(v); setOpen(false); setQ(''); };
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => Math.min(a + 1, list.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (list[active]) choose(list[active].value); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setOpen(false); }
+  };
+  let lastGroup: string | undefined;
+  return (
+    <div ref={boxRef}>
+      <button id={id} type="button" disabled={disabled} onClick={() => setOpen(!open)} aria-haspopup="listbox" aria-expanded={open}
+        className={`${inputCls} text-left flex items-center justify-between gap-2`}>
+        <span className={`truncate ${selected ? '' : 'text-slate-400'}`}>{selected ? selected.label : noneLabel}</span>
+        <span className="text-slate-400 text-xs shrink-0">▾</span>
+      </button>
+      {open && (
+        <div className="mt-1 border border-slate-200 rounded-lg bg-white shadow-sm">
+          <input autoFocus className={`${inputCls} !border-0 !border-b !rounded-b-none !ring-0`} placeholder={searchPlaceholder}
+            value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} aria-label="Search options" />
+          <ul role="listbox" className="max-h-56 overflow-y-auto py-1 text-sm">
+            {list.length === 0 && <li className="px-3 py-2 text-xs text-slate-500">No matches</li>}
+            {list.map((o, i) => {
+              const header = o.group && o.group !== lastGroup ? o.group : null;
+              lastGroup = o.group;
+              return (
+                <React.Fragment key={o.value || '__none'}>
+                  {header && <li className="px-3 pt-2 pb-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">{header}</li>}
+                  <li role="option" aria-selected={o.value === value}
+                    onMouseDown={(e) => { e.preventDefault(); choose(o.value); }} onMouseEnter={() => setActive(i)}
+                    className={`px-3 py-1.5 cursor-pointer ${i === active ? 'bg-sky-50 text-sky-900' : 'text-slate-800'} ${o.value === value ? 'font-semibold' : ''} ${o.value === '' ? 'text-slate-400' : ''}`}>
+                    {o.label}
+                  </li>
+                </React.Fragment>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export const inputCls = 'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 disabled:bg-slate-50 disabled:text-slate-500';
@@ -309,14 +417,16 @@ export function RecordForm({ fields, initial, onSubmit, onCancel, submitLabel = 
                   {t === 'textarea' ? (
                     <textarea id={id} rows={3} className={inputCls} value={vals[f.name]} disabled={f.disabled} placeholder={f.placeholder} onChange={(e) => set(f.name, e.target.value)} />
                   ) : t === 'select' ? (
-                    <select id={id} className={inputCls} value={vals[f.name]} disabled={f.disabled} onChange={(e) => set(f.name, e.target.value)}>
+                    <select id={id} className={inputCls} data-empty={vals[f.name] === ''} value={vals[f.name]} disabled={f.disabled} onChange={(e) => set(f.name, e.target.value)}>
                       {f.nullable && <option value="">— None —</option>}
-                      {f.options?.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      <OptionList options={f.options ?? []} />
                     </select>
+                  ) : t === 'searchselect' ? (
+                    <SearchSelect id={id} value={vals[f.name]} disabled={f.disabled} nullable={f.nullable} options={f.options ?? []} onChange={(v) => set(f.name, v)} />
                   ) : t === 'multiselect' ? (
                     <select id={id} multiple className={`${inputCls} h-32`} value={vals[f.name]} disabled={f.disabled}
                       onChange={(e) => set(f.name, Array.from(e.target.selectedOptions).map((o) => o.value))}>
-                      {f.options?.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      <OptionList options={f.options ?? []} />
                     </select>
                   ) : (
                     <input
@@ -326,6 +436,7 @@ export function RecordForm({ fields, initial, onSubmit, onCancel, submitLabel = 
                       step={t === 'money' ? '0.01' : t === 'number' ? 'any' : undefined}
                       min={t === 'money' || t === 'number' ? 0 : undefined}
                       value={vals[f.name]}
+                      data-empty={vals[f.name] === ''}
                       disabled={f.disabled}
                       placeholder={f.placeholder ?? (t === 'url' ? 'https://' : undefined)}
                       onChange={(e) => set(f.name, e.target.value)}
@@ -340,7 +451,7 @@ export function RecordForm({ fields, initial, onSubmit, onCancel, submitLabel = 
       </div>
       {extra}
       {err && <Notice tone="rose">{err}</Notice>}
-      <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+      <div className="sticky bottom-0 z-10 -mx-5 px-5 py-3 -mb-4 flex justify-end gap-2 bg-white/95 backdrop-blur-sm border-t border-slate-100" data-form-actions>
         <Button onClick={onCancel}>Cancel</Button>
         <Button type="submit" variant="primary" busy={busy}>{submitLabel}</Button>
       </div>

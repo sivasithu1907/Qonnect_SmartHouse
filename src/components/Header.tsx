@@ -70,8 +70,9 @@ export function Header({ section, onNavigate, projects, current, onSelectProject
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16 gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <button onClick={() => go('portfolio')} title="Portfolio" className="w-8 h-8 rounded-lg bg-sky-600 hover:bg-sky-700 flex items-center justify-center text-white shadow-xs shrink-0">
-              <span className="font-bold text-base tracking-tighter">Q</span>
+            <button onClick={() => go('portfolio')} title="Qonnect — all projects" className="flex items-center gap-2 shrink-0 rounded-lg hover:opacity-90">
+              <img src="/qonnect-logo.png" alt="Qonnect" width={36} height={36} className="w-9 h-9 object-contain" />
+              <span className="hidden lg:block text-base font-bold tracking-tight text-slate-900">Qonnect</span>
             </button>
 
             {/* Drive button — opens the selected project's Drive folder */}

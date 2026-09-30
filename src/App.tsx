@@ -144,7 +144,7 @@ function Shell() {
       </main>
       <footer className="border-t border-slate-200 bg-white py-5 text-xs text-slate-500 mt-auto">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <span className="font-semibold text-slate-700">{current ? projectLabel(current) : 'Qonnect Project Control'}</span>
+          <span className="font-semibold text-slate-700">Qonnect{current ? ` · ${projectLabel(current)}` : ''}</span>
           {current && (
             <div className="flex items-center gap-3">
               {current.sheets_url && <a href={current.sheets_url} target="_blank" rel="noopener noreferrer" className="hover:text-emerald-700 flex items-center gap-1"><Table className="w-3.5 h-3.5 text-emerald-600" />Google Sheet</a>}

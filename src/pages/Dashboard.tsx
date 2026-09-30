@@ -32,7 +32,7 @@ export function Dashboard({ project, onNavigate, onSettings }: { project: Projec
 
       {f && !controlConfirmed && (
         <Notice title="Control budget needs confirmation.">
-          Source Variant A / B estimates and the source dashboard totals are reference values only. They are not approved commitments or payments, and the displayed grand totals may double-count costs. An admin must confirm the control budget in project settings.
+          Budget items show only approved / finalized amounts, and items without one are marked Needs confirmation. Budget comparisons are kept in the linked Google Sheet. An admin must confirm the control budget in project settings.
         </Notice>
       )}
 
@@ -41,8 +41,8 @@ export function Dashboard({ project, onNavigate, onSettings }: { project: Projec
           <Kpi label="Control budget" icon={<Coins className="w-4 h-4 text-slate-400" />}
             value={controlConfirmed ? formatQAR(f.controlBudget) : <NeedsConfirmation />}
             hint={f.controlBudget !== null && !f.controlBudgetConfirmed ? `Entered ${formatQAR(f.controlBudget)} — not confirmed` : 'Set by admin'} onClick={() => onNavigate('budget')} />
-          <Kpi label="Approved commitments" tone="emerald" icon={<CheckCircle2 className="w-4 h-4 text-emerald-500" />}
-            value={formatQAR(f.approvedCommitments)} hint={`${f.approvedItemCount} of ${f.itemCount} budget items have an approved amount`} onClick={() => onNavigate('budget')} />
+          <Kpi label="Approved / finalized budget" tone="emerald" icon={<CheckCircle2 className="w-4 h-4 text-emerald-500" />}
+            value={formatQAR(f.approvedCommitments)} hint={`${f.approvedItemCount} of ${f.itemCount} budget items finalized`} onClick={() => onNavigate('budget')} />
           <Kpi label="Amount paid" tone="sky" icon={<CreditCard className="w-4 h-4 text-sky-500" />}
             value={formatQAR(f.paid)} hint="Recorded transfers only" onClick={() => onNavigate('payments')} />
           <Kpi label="Pending (scheduled, unpaid)" tone="amber" icon={<CalendarClock className="w-4 h-4 text-amber-500" />}
@@ -62,13 +62,14 @@ export function Dashboard({ project, onNavigate, onSettings }: { project: Projec
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {f && (
-          <Card title="Budget vs committed vs paid by category" subtitle="Reference = Variant A source estimate (not a commitment). Committed = approved amounts."><div className="max-h-[30rem] overflow-y-auto pr-1">
+          <Card title="Finalized budget vs scheduled vs paid by category" subtitle="Finalized = approved / finalized amounts. Scheduled = payment milestones linked to budget items. Paid = recorded transfers."><div className="max-h-[30rem] overflow-y-auto pr-1">
             <GroupedBars
-              rows={f.byCategory.filter((c: any) => c.source_variant_a || c.source_amount || c.approved || c.paid).map((c: any) => ({
+              rows={f.byCategory.filter((c: any) => c.approved || c.scheduled || c.paid).map((c: any) => ({
                 label: c.name,
-                values: { ref: c.kind === 'fixed' ? c.source_amount : c.source_variant_a, approved: c.approved, paid: c.paid },
+                values: { approved: c.approved, scheduled: c.scheduled, paid: c.paid },
               }))}
-              series={[{ key: 'ref', label: 'Source reference', color: '#cbd5e1' }, { key: 'approved', label: 'Approved / committed', color: '#10b981' }, { key: 'paid', label: 'Paid', color: '#0ea5e9' }]} />
+              series={[{ key: 'approved', label: 'Approved / finalized', color: '#10b981' }, { key: 'scheduled', label: 'Scheduled', color: '#f59e0b' }, { key: 'paid', label: 'Paid', color: '#0ea5e9' }]} />
+            {f.approvedItemCount === 0 && <p className="text-[11px] text-slate-500 mt-2">No finalized amounts yet — every budget item needs confirmation.</p>}
           </div></Card>
         )}
         <Card title="Material status" subtitle="Counts per status across all material lines">

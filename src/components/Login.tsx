@@ -24,10 +24,10 @@ export function Login({ onLoggedIn }: { onLoggedIn: (d: any) => void }) {
     <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
       <form onSubmit={submit} className="w-full max-w-sm bg-white border border-slate-200 rounded-2xl shadow-sm p-6 space-y-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-sky-600 flex items-center justify-center text-white font-bold text-lg">Q</div>
+          <img src="/qonnect-logo.png" alt="Qonnect logo" width={56} height={56} className="w-14 h-14 object-contain shrink-0" />
           <div>
-            <h1 className="text-base font-bold text-slate-900">Qonnect Project Control</h1>
-            <p className="text-xs text-slate-500">Construction budget, payments & site records</p>
+            <h1 className="text-lg font-bold text-slate-900">Qonnect</h1>
+            <p className="text-xs text-slate-500">Smart House project control — budget, payments & site records</p>
           </div>
         </div>
         <div>

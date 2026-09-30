@@ -1,8 +1,6 @@
-// Source-backed values supplied by the owner for Umm Garn — PIN 70153699.
-// Nothing here is an approval, commitment, payment, delivery or completion.
+// Owner-supplied structure for Umm Garn — PIN 70153699 (used only for fresh installs).
+// No budget amounts are seeded; nothing here is an approval, commitment, payment, delivery or completion.
 
-export const SOURCE_DASHBOARD = 'Source dashboard (owner-supplied)';
-export const SOURCE_MASTER_SHEET = 'Master Sheet (owner-supplied)';
 export const SOURCE_MATERIAL_TRACKER = 'Material supply tracker (owner-supplied)';
 
 export const PROJECTS = [
@@ -11,7 +9,7 @@ export const PROJECTS = [
     name: 'Umm Garn',
     location: 'Umm Garn',
     status: 'Existing project — budget needs confirmation',
-    description: 'Existing project. Budget and material supply seeded from owner-supplied source values only.',
+    description: 'Existing project. Budget categories and material supply lines seeded from owner-supplied sources; approved amounts need confirmation.',
     seedSource: true,
   },
   {
@@ -23,47 +21,6 @@ export const PROJECTS = [
     seedSource: false,
   },
 ] as const;
-
-export const FIXED_COSTS: Array<{ name: string; amount: number }> = [
-  { name: 'Contractor Cost', amount: 509500.0 },
-  { name: 'Consultant Cost', amount: 28000.0 },
-  { name: 'Kahramaa Cost', amount: 35000.0 },
-];
-// Fixed cost subtotal shown in the source: 572,500.00 (kept as a source reference)
-
-export const CATEGORY_ESTIMATES: Array<{ name: string; a: number | null; b: number | null }> = [
-  { name: 'Window', a: 34796.5, b: 32175.0 },
-  { name: 'Door', a: 49980.0, b: 40700.0 },
-  { name: 'Floor', a: 129030.2, b: 35611.0 },
-  { name: 'False Ceiling', a: 27008.4, b: 47000.0 },
-  { name: 'Wall Marble / Bathroom', a: 12308.4, b: 10940.8 },
-  { name: 'Bathroom Accessories', a: 32000.0, b: 19500.0 },
-  { name: 'Plumbing', a: 58400.0, b: 48000.0 },
-  { name: 'Staircase', a: 16552.0, b: 16556.0 },
-  { name: 'Air Conditioning', a: 49531.0, b: 60000.0 },
-  { name: 'Electrical & ELV', a: 80000.0, b: 80000.0 },
-  { name: 'Paint Work (Approx.)', a: 50000.0, b: 70000.0 },
-  { name: 'External Kitchen', a: 13060.0, b: 10000.0 },
-  { name: 'Majlis Bathroom - Marble', a: 4920.0, b: 2624.0 },
-  { name: 'Landscape', a: 10000.0, b: null },
-  { name: 'Insulation', a: 26000.0, b: null },
-  { name: 'Foam / Cladding', a: 35000.0, b: null },
-];
-
-export const SUMMARY_REFERENCES: Array<{ label: string; a: number | null; b: number | null; note: string }> = [
-  { label: 'Finishing subtotal', a: 628586.5, b: 473106.8, note: '' },
-  { label: 'Installation 15%', a: null, b: 172673.2, note: 'Shown under Variant B only; calculation basis needs review.' },
-  { label: 'Misc 10%', a: 62858.65, b: null, note: 'Shown under Variant A only.' },
-  { label: 'Subtotal', a: 691445.15, b: 645780.0, note: '' },
-  { label: 'Subtotal with exclusions', a: 534055.5, b: 645780.0, note: '' },
-  { label: 'Fixed costs', a: 572500.0, b: 572500.0, note: 'Contractor 509,500.00 + Consultant 28,000.00 + Kahramaa 35,000.00.' },
-  {
-    label: 'Grand total shown',
-    a: 1798000.65,
-    b: 1864060.0,
-    note: 'Appears to combine subtotal rows in a way that may double-count costs. Not an approved budget. Do not recalculate or approve without an explicit owner decision.',
-  },
-];
 
 type Resp = 'owner' | 'contractor' | 'needs_confirmation';
 export interface SourceMaterial {

@@ -1,9 +1,11 @@
 import React, { useMemo, useState } from 'react';
-import { Archive, Download, FolderOpen, Package, Pencil, Plus, RotateCcw, Truck } from 'lucide-react';
+import { Archive, Download, FolderOpen, Package, Pencil, Plus, RotateCcw, Tags, Truck } from 'lucide-react';
 import { patch, post } from '../lib/api';
 import { useApi } from '../lib/hooks';
 import { useSession } from '../lib/session';
-import type { MaterialItem, Member, Project, ScopeNote } from '../lib/types';
+import type { CategoriesResponse, MaterialCategory, MaterialItem, Member, Project, ScopeNote } from '../lib/types';
+import { categoryOptions } from '../lib/options';
+import { ManageCategories } from '../components/ManageCategories';
 import { formatDate, formatQAR, todayLocalISO } from '../lib/format';
 import { INSPECTION_STATUSES, MATERIAL_STATUSES, SUPPLY_RESPONSIBILITIES, SUPPLY_RESPONSIBILITY_LABELS } from '../../shared/constants';
 import { effectiveDeliveryDate, isMaterialOpen, qtyRemaining } from '../../shared/calc';
@@ -20,9 +22,12 @@ export function Materials({ project }: { project: Project }) {
   const full = can('materials.write') && !project.archived_at;
   const contractor = can('materials.contractor') && !project.archived_at;
   const { data: members } = useApi<Member[]>(full ? `/api/projects/${project.id}/members` : null);
+  const { data: catData, reload: reloadCats } = useApi<CategoriesResponse>(`/api/projects/${project.id}/categories`);
+  const manageCats = can('categories.manage') && !project.archived_at;
+  const [catsOpen, setCatsOpen] = useState(false);
   const { toast, confirm } = useUi();
   const [edit, setEdit] = useState<{ row: MaterialItem | null } | null>(null);
-  const [scopeEdit, setScopeEdit] = useState<{ row: ScopeNote | null; category?: string } | null>(null);
+  const [scopeEdit, setScopeEdit] = useState<{ row: ScopeNote | null; category: MaterialCategory } | null>(null);
   const [cat, setCat] = useState('');
   const [status, setStatus] = useState('');
   const [resp, setResp] = useState('');
@@ -30,8 +35,16 @@ export function Materials({ project }: { project: Project }) {
 
   const today = todayLocalISO();
   const items = useMemo(() => (data?.items ?? []).filter((m) =>
-    (!cat || m.category === cat) && (!status || m.status === status) && (!resp || m.supply_responsibility === resp) && (!mine || m.assigned_contractor_id === user.id)), [data, cat, status, resp, mine, user.id]);
-  const categories = useMemo(() => [...new Set((data?.items ?? []).map((m) => m.category))], [data]);
+    (!cat || m.category_id === cat) && (!status || m.status === status) && (!resp || m.supply_responsibility === resp) && (!mine || m.assigned_contractor_id === user.id)), [data, cat, status, resp, mine, user.id]);
+  // groups follow the centrally managed category order; archived categories still show their existing lines
+  const categories = useMemo<MaterialCategory[]>(() => {
+    const list = [...(catData?.material ?? [])].sort((a, b) => a.sort_order - b.sort_order);
+    const known = new Set(list.map((c) => c.id));
+    for (const m of data?.items ?? []) {
+      if (!known.has(m.category_id)) { known.add(m.category_id); list.push({ id: m.category_id, name: m.category, sort_order: 1e9, archived_at: null }); }
+    }
+    return list;
+  }, [catData, data]);
 
   if (error) return <Notice tone="rose">{error}</Notice>;
   if (!data) return <Spinner />;
@@ -42,7 +55,8 @@ export function Materials({ project }: { project: Project }) {
   const fields = (row: MaterialItem | null): FieldSpec[] => {
     const lock = (name: string) => !full && !CONTRACTOR_FIELDS.has(name);
     const f: FieldSpec[] = [
-      { name: 'category', label: 'Category', required: true },
+      { name: 'category_id', label: 'Category', type: 'select', required: true, options: categoryOptions(catData?.material ?? [], row?.category_id),
+        help: manageCats ? 'Categories are maintained in Manage categories.' : undefined },
       { name: 'description', label: 'Material / description', required: true },
       { name: 'quantity', label: 'Quantity', type: 'number' },
       { name: 'unit', label: 'Unit' },
@@ -73,8 +87,8 @@ export function Materials({ project }: { project: Project }) {
     try { await post(url); toast(msg); await reload(); } catch (e) { toast((e as Error).message, 'error'); }
   };
 
-  const grouped = categories.filter((c) => items.some((m) => m.category === c));
-  const noteFor = (c: string) => data.scopeNotes.find((n) => n.category === c);
+  const grouped = categories.filter((c) => items.some((m) => m.category_id === c.id));
+  const noteFor = (c: MaterialCategory) => data.scopeNotes.find((n) => n.category_id === c.id);
 
   return (
     <div className="space-y-6">
@@ -82,6 +96,7 @@ export function Materials({ project }: { project: Project }) {
         actions={<>
           <LinkButton href={project.materials_drive_url} label="Materials Drive folder" icon={<FolderOpen className="w-3.5 h-3.5" />} />
           <a href={`/api/projects/${project.id}/reports/materials.csv`}><Button><Download className="w-4 h-4" />CSV</Button></a>
+          {manageCats && <Button onClick={() => setCatsOpen(true)}><Tags className="w-4 h-4" />Manage categories</Button>}
           {full && <Button variant="primary" onClick={() => setEdit({ row: null })}><Plus className="w-4 h-4" />Material line</Button>}
         </>} />
 
@@ -96,7 +111,7 @@ export function Materials({ project }: { project: Project }) {
 
       <Card>
         <div className="flex flex-wrap items-center gap-2 mb-4">
-          <select className={`${inputCls} !w-auto`} value={cat} onChange={(e) => setCat(e.target.value)}><option value="">All categories</option>{categories.map((c) => <option key={c}>{c}</option>)}</select>
+          <select className={`${inputCls} !w-auto`} value={cat} onChange={(e) => setCat(e.target.value)}><option value="">All categories</option>{categories.map((c) => <option key={c.id} value={c.id}>{c.name}{c.archived_at ? ' (archived)' : ''}</option>)}</select>
           <select className={`${inputCls} !w-auto`} value={status} onChange={(e) => setStatus(e.target.value)}><option value="">All statuses</option>{MATERIAL_STATUSES.map((s) => <option key={s}>{s}</option>)}</select>
           <select className={`${inputCls} !w-auto`} value={resp} onChange={(e) => setResp(e.target.value)}><option value="">All responsibilities</option>{SUPPLY_RESPONSIBILITIES.map((r) => <option key={r} value={r}>{SUPPLY_RESPONSIBILITY_LABELS[r]}</option>)}</select>
           {contractor && <label className="flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} />Assigned to me</label>}
@@ -105,9 +120,9 @@ export function Materials({ project }: { project: Project }) {
         {grouped.length === 0 ? <EmptyState>{data.items.length ? 'No lines match the filters.' : 'No material lines yet.'}</EmptyState> : grouped.map((c) => {
           const note = noteFor(c);
           return (
-            <div key={c} className="mb-6 last:mb-0">
+            <div key={c.id} className="mb-6 last:mb-0">
               <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2"><Package className="w-4 h-4 text-sky-600" />{c}</h3>
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2"><Package className="w-4 h-4 text-sky-600" />{c.name}{c.archived_at && <Badge tone="rose">Archived category</Badge>}</h3>
                 {full && <Button size="sm" variant="ghost" onClick={() => setScopeEdit({ row: note ?? null, category: c })}><Pencil className="w-3.5 h-3.5" />Scope notes</Button>}
               </div>
               {note && (
@@ -120,7 +135,7 @@ export function Materials({ project }: { project: Project }) {
               <Table>
                 <thead><tr><Th className="w-[190px]">Item</Th><Th>Qty</Th><Th>Responsibility</Th><Th>Vendor / assigned</Th><Th>Status</Th><Th>Required on site</Th><Th>Delivery</Th><Th>Ordered / delivered / remaining</Th><Th>Inspection</Th><Th>Follow-up</Th><Th /></tr></thead>
                 <tbody className="divide-y divide-slate-100">
-                  {items.filter((m) => m.category === c).map((m) => {
+                  {items.filter((m) => m.category_id === c.id).map((m) => {
                     const eff = effectiveDeliveryDate(m);
                     const late = isMaterialOpen(m.status) && !m.actual_delivery_date && eff.date && eff.date < today;
                     const canEditRow = full || (contractor && m.assigned_contractor_id === user.id);
@@ -170,32 +185,41 @@ export function Materials({ project }: { project: Project }) {
             <div className="space-y-4">
               {canEdit ? (
                 <RecordForm fields={fields(row)} initial={row ?? { supply_responsibility: 'needs_confirmation', status: 'Status not confirmed' }} mode={row ? 'edit' : 'create'} onCancel={() => setEdit(null)}
+                  extra={row && <Attachments projectId={project.id} entityType="material" entityId={row.id} defaultKind="delivery_note" canUpload={!!canEdit && !row.archived_at} onChange={reload} />}
                   onSubmit={async (v) => {
                     if (row) await patch(`${base}/${row.id}`, v); else await post(base, v);
-                    toast('Material line saved'); setEdit(null); await reload();
+                    toast('Material line saved'); setEdit(null); await reload(); await reloadCats();
                   }} />
-              ) : <p className="text-xs text-slate-500">This line is not assigned to you, so it is read-only.</p>}
-              {row && <Attachments projectId={project.id} entityType="material" entityId={row.id} defaultKind="delivery_note" canUpload={!!canEdit && !row.archived_at} onChange={reload} />}
+              ) : (
+                <>
+                  <p className="text-xs text-slate-500">This line is not assigned to you, so it is read-only.</p>
+                  {row && <Attachments projectId={project.id} entityType="material" entityId={row.id} defaultKind="delivery_note" canUpload={false} onChange={reload} />}
+                </>
+              )}
             </div>
           );
         })()}
       </Modal>
 
-      <Modal open={!!scopeEdit} onClose={() => setScopeEdit(null)} title={`Scope notes — ${scopeEdit?.category ?? ''}`}>
+      <Modal open={!!scopeEdit} onClose={() => setScopeEdit(null)} title={`Scope notes — ${scopeEdit?.category.name ?? ''}`}>
         {scopeEdit && (
-          <RecordForm initial={scopeEdit.row ?? { category: scopeEdit.category }} mode={scopeEdit.row ? 'edit' : 'create'}
+          <RecordForm initial={scopeEdit.row} mode={scopeEdit.row ? 'edit' : 'create'}
             fields={[
-              { name: 'category', label: 'Category', required: true, disabled: !!scopeEdit.row },
               { name: 'owner_supply', label: 'Owner supply', type: 'textarea' },
               { name: 'contractor_scope', label: 'Contractor scope', type: 'textarea' },
               { name: 'source_label', label: 'Source label' },
             ]}
             onCancel={() => setScopeEdit(null)}
             onSubmit={async (v) => {
-              if (scopeEdit.row) await patch(`${base}/scope-notes/${scopeEdit.row.id}`, v); else await post(`${base}/scope-notes`, v);
+              if (scopeEdit.row) await patch(`${base}/scope-notes/${scopeEdit.row.id}`, v);
+              else await post(`${base}/scope-notes`, { ...v, category_id: scopeEdit.category.id });
               toast('Scope notes saved'); setScopeEdit(null); await reload();
             }} />
         )}
+      </Modal>
+
+      <Modal open={catsOpen} onClose={() => setCatsOpen(false)} wide title="Manage categories" subtitle={`${project.name} — ${project.code}`}>
+        {catsOpen && <ManageCategories projectId={project.id} initialTab="material" onChanged={async () => { await reloadCats(); await reload(); }} />}
       </Modal>
     </div>
   );

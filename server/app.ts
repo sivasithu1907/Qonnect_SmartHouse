@@ -12,6 +12,7 @@ import { authRoutes } from './routes/auth';
 import { userRoutes } from './routes/users';
 import { projectCollectionRoutes, projectItemRoutes } from './routes/projects';
 import { budgetRoutes } from './routes/budget';
+import { categoryRoutes } from './routes/categories';
 import { paymentRoutes } from './routes/payments';
 import { materialRoutes } from './routes/materials';
 import { visitRoutes } from './routes/visits';
@@ -61,6 +62,7 @@ export function createApp(pool: pg.Pool, cfg: AppConfig) {
 
   const project = express.Router({ mergeParams: true });
   project.use('/budget', budgetRoutes(pool));
+  project.use('/categories', categoryRoutes(pool));
   project.use('/payments', paymentRoutes(pool, cfg.timeZone));
   project.use('/materials', materialRoutes(pool));
   project.use('/visits', visitRoutes(pool));
