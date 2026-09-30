@@ -17,11 +17,20 @@ import { paymentRoutes } from './routes/payments';
 import { materialRoutes } from './routes/materials';
 import { visitRoutes } from './routes/visits';
 import { timelineRoutes, workUpdateRoutes } from './routes/timeline';
+import { notificationRoutes } from './routes/notifications';
+import { Notifier } from './notify/notifier';
+import { createWebPushSender, type PushSender } from './notify/push';
 import { attachmentRoutes } from './routes/attachments';
 import { dashboardRoutes, portfolioRoute } from './routes/dashboard';
 
-export function createApp(pool: pg.Pool, cfg: AppConfig) {
+export interface AppOptions {
+  pushSender?: PushSender; // injectable for tests
+}
+
+export function createApp(pool: pg.Pool, cfg: AppConfig, opts: AppOptions = {}) {
   const app = express();
+  const notifier = new Notifier(pool, opts.pushSender ?? createWebPushSender(cfg));
+  app.locals.notifier = notifier;
   app.disable('x-powered-by');
   app.set('trust proxy', cfg.trustProxy);
 
@@ -58,15 +67,16 @@ export function createApp(pool: pg.Pool, cfg: AppConfig) {
   app.use('/api/auth', authRoutes(pool, cfg));
   app.use('/api/users', requireAuth, userRoutes(pool));
   app.use('/api/portfolio', requireAuth, portfolioRoute(pool, cfg.timeZone));
+  app.use('/api/notifications', requireAuth, notificationRoutes(pool, cfg, notifier));
   app.use('/api/projects', requireAuth, projectCollectionRoutes(pool));
 
   const project = express.Router({ mergeParams: true });
   project.use('/budget', budgetRoutes(pool));
   project.use('/categories', categoryRoutes(pool));
   project.use('/payments', paymentRoutes(pool, cfg.timeZone));
-  project.use('/materials', materialRoutes(pool));
-  project.use('/visits', visitRoutes(pool));
-  project.use('/timeline', timelineRoutes(pool));
+  project.use('/materials', materialRoutes(pool, notifier));
+  project.use('/visits', visitRoutes(pool, notifier));
+  project.use('/timeline', timelineRoutes(pool, notifier));
   project.use('/work-updates', workUpdateRoutes(pool));
   project.use('/attachments', attachmentRoutes(pool, cfg));
   project.use('/', dashboardRoutes(pool, cfg.timeZone));
@@ -77,7 +87,23 @@ export function createApp(pool: pg.Pool, cfg: AppConfig) {
 
   // Serve the built SPA in production
   if (fs.existsSync(path.join(cfg.staticDir, 'index.html'))) {
-    app.use(express.static(cfg.staticDir, { index: false, maxAge: '1h' }));
+    app.use(express.static(cfg.staticDir, {
+      index: false,
+      maxAge: '1h',
+      setHeaders(res, filePath) {
+        const base = path.basename(filePath);
+        if (base === 'sw.js') {
+          // the service worker must always be re-checked so updates roll out promptly
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Service-Worker-Allowed', '/');
+        } else if (base === 'manifest.webmanifest') {
+          res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+          res.setHeader('Cache-Control', 'no-cache');
+        } else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable'); // content-hashed file names
+        }
+      },
+    }));
     app.get(/^\/(?!api\/).*/, (_req, res) => {
       res.setHeader('Cache-Control', 'no-cache');
       res.sendFile(path.join(cfg.staticDir, 'index.html'));

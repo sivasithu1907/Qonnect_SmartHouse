@@ -7,6 +7,7 @@ await build({
     migrate: 'server/cli/migrate.ts',
     seed: 'server/cli/seed.ts',
     'create-admin': 'server/cli/create-admin.ts',
+    'generate-vapid-keys': 'server/cli/generate-vapid-keys.ts',
   },
   outdir: 'dist-server',
   bundle: true,

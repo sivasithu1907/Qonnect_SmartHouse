@@ -9,6 +9,8 @@ import { assertProjectMember, getOwned, insertRow, patchOwned } from '../lib/cru
 import { badRequest } from '../lib/http';
 import { can, CONTRACTOR_MATERIAL_FIELDS } from '../permissions';
 import { INSPECTION_STATUSES, MATERIAL_STATUSES, SUPPLY_RESPONSIBILITIES } from '../../shared/constants';
+import type { Notifier } from '../notify/notifier';
+import { materialDateEvents } from '../notify/events';
 
 export async function loadMaterials(db: pg.Pool | pg.PoolClient, projectId: string, includeArchived = false) {
   const [items, notes] = await Promise.all([
@@ -69,7 +71,7 @@ const materialSchema = z.object({
   sort_order: z.number().int().min(0).max(100000).optional(),
 });
 
-export function materialRoutes(pool: pg.Pool) {
+export function materialRoutes(pool: pg.Pool, notifier: Notifier) {
   const r = Router({ mergeParams: true });
 
   r.get('/', async (req, res) => {
@@ -129,9 +131,10 @@ export function materialRoutes(pool: pg.Pool) {
         summary: `${after.category} — ${after.description}: ${d.changed.join(', ')}`,
         before: d.before, after: d.after,
       });
-      return after;
+      return { before, after, dateChanged: dateChanges.length > 0 };
     });
-    res.json(out);
+    if (out.dateChanged) notifier.emit(await materialDateEvents(pool, out.before, out.after, u.id).catch(() => []));
+    res.json(out.after);
   });
 
   for (const action of ['archive', 'restore'] as const) {

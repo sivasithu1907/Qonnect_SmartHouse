@@ -54,6 +54,10 @@ Production / staging deployment: see **[DEPLOYMENT.md](DEPLOYMENT.md)**.
 | `APP_TIMEZONE` | no | `Asia/Qatar` | Used for "today" / overdue calculations |
 | `MIGRATE_ON_START` | no | `false` | Run migrations when the app starts |
 | `ADMIN_EMAIL`, `ADMIN_NAME`, `ADMIN_PASSWORD` | only for `create-admin` | — | Bootstrap an admin; unset afterwards |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | only for push | — | Web Push key pair. Generate with `node dist-server/generate-vapid-keys.js` (see DEPLOYMENT.md). Push stays off while blank |
+| `VAPID_SUBJECT` | only for push | — | `mailto:` address you monitor, sent to push services as the contact |
+| `PUSH_ALLOWED_HOSTS` | no | — | Extra push-service hosts (comma-separated). Google, Mozilla, Apple and Microsoft services are allowed by default |
+| `NOTIFY_SCHEDULER` | no | `true` in production | Hourly due-soon / overdue checks for payments, materials and timeline tasks |
 
 No passwords, tokens or private URLs are stored in the code.
 
@@ -82,6 +86,20 @@ No passwords, tokens or private URLs are stored in the code.
 
 Admins see all projects. Every other user sees only the projects they are assigned to; any other project (or a record ID belonging to another project) returns *404*. Archived projects are hidden from non-admins and are read-only until restored.
 
+## Notifications and installable app
+
+- **Install:** Qonnect is an installable web app (manifest + service worker). Chrome, Edge and Samsung Internet show **Install app** in the user menu. On iPhone/iPad use Safari → Share → **Add to Home Screen**. Installing needs HTTPS (or `localhost` through the SSH tunnel).
+- **What the service worker caches:** only the static shell (page, manifest, icons, logo) and the content-hashed `/assets/*` files. It never touches `/api/*`: no project data, payments, uploads or other signed-in responses are cached, and there is no offline editing.
+- **Alerts:** each user has a bell list in the header with read/unread state. They can choose event types and mute projects under **User menu → Notifications**. Push is optional per device. The browser asks for permission only after the user taps **Enable notifications**, and Qonnect never asks again after a denial.
+- **Events:**
+  - site/consultant visit assigned or rescheduled → the assignee;
+  - timeline task assigned → the assignee;
+  - task due in 3 days / overdue → the assignee, plus managers when overdue or unassigned;
+  - material delivery date changed / due in 3 days / overdue → admins, project managers and the assigned contractor;
+  - payment milestone due in 3 days / overdue → only users with payment access (admin, project manager, viewer).
+  The person who made a change isn't notified about it. Each event is sent once, and a new date counts as a new event.
+- **Privacy:** push messages carry only the project code and a generic sentence, e.g. "A payment milestone needs attention". Amounts, names, purposes and notes are never included. Tapping opens the record behind the normal login and permission checks. Push is limited to 10 messages per user per 10 minutes; anything over the limit stays in the bell list.
+
 ## Security summary
 
 - Opaque session token in an `HttpOnly`, `SameSite=Strict`, `Secure` cookie; only its SHA-256 is stored. Sliding expiry, logout and password change/deactivation revoke sessions.
@@ -91,6 +109,7 @@ Admins see all projects. Every other user sees only the projects they are assign
 - Zod validation on every input; parameterised SQL only; PATCH requests only change fields the client actually sent.
 - Uploads: PDF / JPG / PNG / WEBP / HEIC / DOCX / XLSX detected from file content (magic bytes), size-limited, stored under random names outside the web root, and downloaded only through an endpoint that re-checks project membership and role (`nosniff`, sandbox CSP, `no-store`).
 - Important records are archived/voided, never hard-deleted by the app. Audit log records who changed what (before/after) for payments, budget edits and approvals, delivery-date changes, project edits, archive/restore, uploads and logins.
+- Push subscriptions belong to one user. Users can list and remove only their own, and the list never returns keys or endpoints. Endpoints must be HTTPS on a known push service. Expired subscriptions (404/410) and ones that keep failing are removed automatically. VAPID keys are never logged.
 - Duplicate bank/cheque references are blocked per project (database unique index + API check). Overpayments require explicit confirmation and are flagged. Transfer dates cannot be in the future.
 
 ## Google Drive / Sheets

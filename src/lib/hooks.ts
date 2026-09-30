@@ -23,3 +23,32 @@ export function useApi<T>(url: string | null) {
   useEffect(() => { setData(null); void load(); }, [load]);
   return { data, error, loading, reload: load, setData };
 }
+
+/**
+ * Opens / highlights a record requested by a notification link (#/section/project/record).
+ * Runs once the list has loaded; unknown ids (archived, no access) are simply ignored.
+ */
+export function useFocusRecord<T>(
+  focusId: string | null | undefined,
+  list: T[] | null | undefined,
+  getId: (item: T) => string,
+  open: (item: T) => void,
+  onHandled?: () => void,
+) {
+  useEffect(() => {
+    if (!focusId || !list) return;
+    const item = list.find((x) => getId(x) === focusId);
+    if (item) {
+      open(item);
+      setTimeout(() => {
+        const el = document.getElementById(`rec-${focusId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.classList.add('ring-2', 'ring-sky-400');
+          setTimeout(() => el.classList.remove('ring-2', 'ring-sky-400'), 2500);
+        }
+      }, 150);
+    }
+    onHandled?.();
+  }, [focusId, list]); // eslint-disable-line react-hooks/exhaustive-deps
+}

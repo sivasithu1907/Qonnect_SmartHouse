@@ -5,14 +5,20 @@ import { assertCap } from '../auth';
 import { badRequest, forbidden, HttpError, parseBody, parsePatch, uuidParam, zDate, zText } from '../lib/http';
 import { withTx } from '../db';
 import { audit, diff } from '../audit';
-import { assertSameProject, getOwned, insertRow, patchOwned } from '../lib/crud';
+import { assertProjectMember, assertSameProject, getOwned, insertRow, patchOwned } from '../lib/crud';
 import { can } from '../permissions';
 import { TASK_STATUSES } from '../../shared/constants';
+import type { Notifier } from '../notify/notifier';
+import { taskAssignedEvents } from '../notify/events';
 
 export async function loadTimeline(db: pg.Pool | pg.PoolClient, projectId: string, includeArchived = false) {
   const [ph, tk, dp] = await Promise.all([
     db.query('SELECT * FROM timeline_phases WHERE project_id = $1 AND ($2 OR archived_at IS NULL) ORDER BY seq, created_at', [projectId, includeArchived]),
-    db.query('SELECT * FROM timeline_tasks WHERE project_id = $1 AND ($2 OR archived_at IS NULL) ORDER BY sort_order, created_at', [projectId, includeArchived]),
+    db.query(
+      `SELECT t.*, u.name AS assigned_user_name FROM timeline_tasks t LEFT JOIN users u ON u.id = t.assigned_user_id
+        WHERE t.project_id = $1 AND ($2 OR t.archived_at IS NULL) ORDER BY t.sort_order, t.created_at`,
+      [projectId, includeArchived],
+    ),
     db.query('SELECT task_id, depends_on_task_id FROM task_dependencies WHERE project_id = $1', [projectId]),
   ]);
   const deps = new Map<string, string[]>();
@@ -43,6 +49,7 @@ const taskSchema = z.object({
   actual_end: zDate.optional(),
   status: z.enum(TASK_STATUSES).default('Not Scheduled'),
   responsible: zText(200).default(''),
+  assigned_user_id: z.preprocess((v) => (v === '' ? null : v), z.string().uuid().nullable()).optional(),
   notes: zText(4000).default(''),
   sort_order: z.number().int().min(0).max(10000).optional(),
   depends_on: z.array(z.string().uuid()).max(50).optional(),
@@ -75,7 +82,7 @@ async function openDependencies(c: pg.PoolClient, pid: string, taskId: string): 
   return rows.map((r) => r.name);
 }
 
-export function timelineRoutes(pool: pg.Pool) {
+export function timelineRoutes(pool: pg.Pool, notifier: Notifier) {
   const r = Router({ mergeParams: true });
 
   r.get('/', async (req, res) => {
@@ -123,12 +130,14 @@ export function timelineRoutes(pool: pg.Pool) {
     const row = await withTx(pool, async (c) => {
       await assertSameProject(c, 'timeline_phases', pid, body.phase_id, 'Phase');
       if (body.status === 'Completed') throw badRequest('Create the task first, then mark it completed with an actual completion date');
+      await assertProjectMember(c, pid, body.assigned_user_id);
       const { depends_on, override_dependencies: _o, ...data } = body;
       const t = await insertRow(c, 'timeline_tasks', { ...data, project_id: pid });
       if (depends_on?.length) await setDependencies(c, pid, t.id as string, depends_on);
       await audit(c, req, { projectId: pid, action: 'create', entityType: 'timeline_task', entityId: t.id as string, summary: `Added task ${body.name}`, after: { ...t, depends_on } });
       return t;
     });
+    notifier.emit(taskAssignedEvents(null, row, req.user!.id));
     res.status(201).json(row);
   });
 
@@ -140,6 +149,7 @@ export function timelineRoutes(pool: pg.Pool) {
     const out = await withTx(pool, async (c) => {
       const cur = await getOwned<Record<string, unknown>>(c, 'timeline_tasks', pid, id);
       if (body.phase_id) await assertSameProject(c, 'timeline_phases', pid, body.phase_id, 'Phase');
+      if (body.assigned_user_id !== undefined) await assertProjectMember(c, pid, body.assigned_user_id);
       const { depends_on, override_dependencies, ...data } = body;
       if (depends_on) await setDependencies(c, pid, id, depends_on);
       const nextStatus = data.status ?? cur.status;
@@ -161,9 +171,10 @@ export function timelineRoutes(pool: pg.Pool) {
         summary: `Edited task ${after.name} (${[...d.changed, ...(depends_on ? ['depends_on'] : [])].join(', ')})${override_dependencies ? ' — dependency check overridden' : ''}`,
         before: d.before, after: { ...d.after, ...(depends_on ? { depends_on } : {}) },
       });
-      return after;
+      return { before, after };
     });
-    res.json(out);
+    notifier.emit(taskAssignedEvents(out.before, out.after, req.user!.id));
+    res.json(out.after);
   });
 
   for (const kind of ['phases', 'tasks'] as const) {

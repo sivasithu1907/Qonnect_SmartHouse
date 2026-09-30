@@ -27,7 +27,21 @@ export interface AppConfig {
   appOrigin: string; // optional, enables Origin header checks when set
   timeZone: string;
   staticDir: string;
+  // Web Push (VAPID). Push is disabled when the keys are not set.
+  vapidPublicKey: string;
+  vapidPrivateKey: string;
+  vapidSubject: string;
+  pushAllowedHosts: string[];      // host suffixes of trusted push services (SSRF protection)
+  pushAllowInsecureEndpoints: boolean; // tests only
+  notifySchedulerEnabled: boolean;
 }
+
+const DEFAULT_PUSH_HOSTS = [
+  'fcm.googleapis.com', 'android.googleapis.com',          // Chrome, Edge (Chromium), Android
+  'push.services.mozilla.com',                              // Firefox
+  'push.apple.com',                                          // Safari / iOS / iPadOS
+  'notify.windows.com',                                      // legacy Edge / Windows
+];
 
 export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   const nodeEnv = process.env.NODE_ENV ?? 'development';
@@ -45,6 +59,15 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     appOrigin: (process.env.APP_ORIGIN ?? '').replace(/\/$/, ''),
     timeZone: process.env.APP_TIMEZONE ?? 'Asia/Qatar',
     staticDir: path.resolve(process.env.STATIC_DIR ?? './dist'),
+    vapidPublicKey: (process.env.VAPID_PUBLIC_KEY ?? '').trim(),
+    vapidPrivateKey: (process.env.VAPID_PRIVATE_KEY ?? '').trim(),
+    vapidSubject: (process.env.VAPID_SUBJECT ?? '').trim(),
+    pushAllowedHosts: [
+      ...DEFAULT_PUSH_HOSTS,
+      ...(process.env.PUSH_ALLOWED_HOSTS ?? '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean),
+    ],
+    pushAllowInsecureEndpoints: false,
+    notifySchedulerEnabled: bool('NOTIFY_SCHEDULER', nodeEnv === 'production'),
     ...overrides,
   };
 }

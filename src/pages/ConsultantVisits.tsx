@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { Archive, FolderOpen, Plus, RotateCcw, UserCheck } from 'lucide-react';
 import { patch, post } from '../lib/api';
-import { useApi } from '../lib/hooks';
+import { useApi, useFocusRecord } from '../lib/hooks';
 import { useSession } from '../lib/session';
-import type { ConsultantVisit, MaterialItem, Member, Phase, Project, Task } from '../lib/types';
+import type { FocusProps, ConsultantVisit, MaterialItem, Member, Phase, Project, Task } from '../lib/types';
 import { formatDate, formatDateTime } from '../lib/format';
 import { CONSULTANT_VISIT_STATUSES } from '../../shared/constants';
 import { Attachments } from '../components/Attachments';
@@ -23,7 +23,7 @@ export function useLinkOptions(projectId: string) {
   return { taskOptions, materialOptions, label };
 }
 
-export function ConsultantVisits({ project }: { project: Project }) {
+export function ConsultantVisits({ project, focusId, onFocusHandled }: { project: Project } & FocusProps) {
   const base = `/api/projects/${project.id}/visits`;
   const { data, error, reload } = useApi<ConsultantVisit[]>(`${base}/consultant`);
   const { user, can } = useSession();
@@ -33,6 +33,7 @@ export function ConsultantVisits({ project }: { project: Project }) {
   const { taskOptions, materialOptions, label } = useLinkOptions(project.id);
   const { toast, confirm } = useUi();
   const [edit, setEdit] = useState<{ row: ConsultantVisit | null } | null>(null);
+  useFocusRecord(focusId, data, (v) => v.id, (v) => setEdit({ row: v }), onFocusHandled);
 
   if (error) return <Notice tone="rose">{error}</Notice>;
   if (!data) return <Spinner />;
@@ -73,7 +74,7 @@ export function ConsultantVisits({ project }: { project: Project }) {
             {data.map((v) => {
               const openActions = v.actions.filter((a) => a.status === 'Open').length;
               return (
-                <div key={v.id} className="py-3 flex flex-col md:flex-row md:items-start justify-between gap-3">
+                <div key={v.id} id={`rec-${v.id}`} className="py-3 flex flex-col md:flex-row md:items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-sm font-semibold text-slate-900">{v.purpose}</span>

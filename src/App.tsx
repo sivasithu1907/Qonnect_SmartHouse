@@ -17,13 +17,22 @@ import { SiteVisits } from './pages/SiteVisits';
 import { Timeline } from './pages/Timeline';
 import { AuditLog } from './pages/AuditLog';
 import { UsersAdmin } from './pages/UsersAdmin';
+import { NotificationSettings } from './pages/NotificationSettings';
+import { UpdateBanner } from './components/UpdateBanner';
+import { InstallAppDialog } from './components/InstallApp';
+import { detachDeviceOnLogout, syncSubscription } from './lib/push';
 
-const SECTIONS: Section[] = ['portfolio', 'dashboard', 'budget', 'payments', 'materials', 'consultant', 'site', 'timeline', 'audit', 'users'];
+const SECTIONS: Section[] = ['portfolio', 'dashboard', 'budget', 'payments', 'materials', 'consultant', 'site', 'timeline', 'audit', 'users', 'notifications'];
+const UUID = /^[0-9a-f-]{36}$/i;
 
-/** Location hash: #/<section>/<projectId?> — keeps selection across reloads. */
-function readHash(): { section: Section; projectId: string | null } {
-  const [, s, p] = window.location.hash.split('/');
-  return { section: SECTIONS.includes(s as Section) ? (s as Section) : 'dashboard', projectId: p && /^[0-9a-f-]{36}$/i.test(p) ? p : null };
+/** Location hash: #/<section>/<projectId?>/<recordId?> — keeps selection across reloads; notification links add a record id. */
+function readHash(): { section: Section; projectId: string | null; focusId: string | null } {
+  const [, s, p, f] = window.location.hash.split('/');
+  return {
+    section: SECTIONS.includes(s as Section) ? (s as Section) : 'dashboard',
+    projectId: p && UUID.test(p) ? p : null,
+    focusId: f && UUID.test(f) ? f : null,
+  };
 }
 
 export default function App() {
@@ -43,7 +52,10 @@ export default function App() {
     user: auth.user,
     capabilities: auth.capabilities,
     can: (c: string) => auth.capabilities.includes(c),
-    logout: () => { post('/api/auth/logout').finally(() => { setAuth(null); window.location.hash = ''; }); },
+    logout: () => {
+      // stop this (possibly shared) device receiving this user's alerts, then sign out
+      void detachDeviceOnLogout().finally(() => post('/api/auth/logout').finally(() => { setAuth(null); window.location.hash = ''; }));
+    },
   } : null, [auth]);
 
   if (auth === undefined) return <Spinner />;
@@ -68,6 +80,22 @@ function Shell() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pwOpen, setPwOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [focusId, setFocusId] = useState<string | null>(initial.focusId);
+  const [installOpen, setInstallOpen] = useState(false);
+
+  useEffect(() => { void syncSubscription(); }, []);
+  // a tapped push notification asks an already-open window to navigate
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    const on = (e: MessageEvent) => {
+      if (e.data?.type === 'OPEN_URL' && typeof e.data.url === 'string' && e.data.url.startsWith('/')) {
+        const hash = e.data.url.includes('#') ? e.data.url.slice(e.data.url.indexOf('#')) : '';
+        if (hash) window.location.hash = hash;
+      }
+    };
+    navigator.serviceWorker.addEventListener('message', on);
+    return () => navigator.serviceWorker.removeEventListener('message', on);
+  }, []);
 
   const loadProjects = useCallback(async () => {
     try {
@@ -92,14 +120,14 @@ function Shell() {
     if (window.location.hash !== h) window.history.replaceState(null, '', h);
   }, [section, current]);
   useEffect(() => {
-    const on = () => { const r = readHash(); setSection(r.section); if (r.projectId) setProjectId(r.projectId); };
+    const on = () => { const r = readHash(); setSection(r.section); if (r.projectId) setProjectId(r.projectId); if (r.focusId) setFocusId(r.focusId); };
     window.addEventListener('hashchange', on);
     return () => window.removeEventListener('hashchange', on);
   }, []);
 
   const selectProject = (id: string) => {
     setProjectId(id);
-    if (section === 'portfolio' || section === 'users') setSection('dashboard');
+    if (section === 'portfolio' || section === 'users' || section === 'notifications') setSection('dashboard');
   };
   const onProjectSaved = async (p: Project | null) => {
     await loadProjects();
@@ -111,7 +139,8 @@ function Shell() {
 
   const selectable = projects.filter((p) => !p.archived_at || p.id === current?.id);
   const pageKey = `${current?.id}-${refreshKey}`;
-  const needsProject = !['portfolio', 'users'].includes(section);
+  const needsProject = !['portfolio', 'users', 'notifications'].includes(section);
+  const focusProps = { focusId, onFocusHandled: () => setFocusId(null) };
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
@@ -124,20 +153,23 @@ function Shell() {
         onCreateProject={() => setCreateOpen(true)}
         onProjectSettings={() => setSettingsOpen(true)}
         onChangePassword={() => setPwOpen(true)}
+        onInstallApp={() => setInstallOpen(true)}
       />
+      <UpdateBanner />
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {section === 'portfolio' && <Portfolio key={refreshKey} onOpen={(id, s) => { setProjectId(id); setSection(s ?? 'dashboard'); }} onCreate={() => setCreateOpen(true)} />}
         {section === 'users' && <UsersAdmin projects={projects} />}
+        {section === 'notifications' && <NotificationSettings projects={projects.filter((p) => !p.archived_at)} onInstallApp={() => setInstallOpen(true)} />}
         {needsProject && !current && <EmptyState title="No project selected">You are not assigned to any active project yet. Ask an administrator for access.</EmptyState>}
         {needsProject && current && (
           <React.Fragment key={pageKey}>
             {section === 'dashboard' && <Dashboard project={current} onNavigate={setSection} onSettings={() => setSettingsOpen(true)} />}
             {section === 'budget' && <Budget project={current} onSettings={() => setSettingsOpen(true)} />}
-            {section === 'payments' && <Payments project={current} />}
-            {section === 'materials' && <Materials project={current} />}
-            {section === 'consultant' && <ConsultantVisits project={current} />}
-            {section === 'site' && <SiteVisits project={current} />}
-            {section === 'timeline' && <Timeline project={current} />}
+            {section === 'payments' && <Payments project={current} {...focusProps} />}
+            {section === 'materials' && <Materials project={current} {...focusProps} />}
+            {section === 'consultant' && <ConsultantVisits project={current} {...focusProps} />}
+            {section === 'site' && <SiteVisits project={current} {...focusProps} />}
+            {section === 'timeline' && <Timeline project={current} {...focusProps} />}
             {section === 'audit' && <AuditLog project={current} />}
           </React.Fragment>
         )}
@@ -156,6 +188,7 @@ function Shell() {
       <CreateProjectModal open={createOpen} onClose={() => setCreateOpen(false)} onCreated={async (p) => { setCreateOpen(false); await loadProjects(); setProjectId(p.id); setSection('dashboard'); }} />
       <ProjectSettingsModal key={current?.id} open={settingsOpen} project={current} onClose={() => setSettingsOpen(false)} onSaved={async (p) => { setSettingsOpen(false); await onProjectSaved(p); }} />
       <ChangePasswordModal open={pwOpen} onClose={() => setPwOpen(false)} />
+      <InstallAppDialog open={installOpen} onClose={() => setInstallOpen(false)} />
     </div>
   );
 }

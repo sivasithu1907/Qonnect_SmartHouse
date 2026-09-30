@@ -7,7 +7,9 @@ import request from 'supertest';
 import type pg from 'pg';
 import { createPool } from '../server/db';
 import { createApp } from '../server/app';
-import { loadConfig } from '../server/config';
+import { loadConfig, type AppConfig } from '../server/config';
+import type { PushSender } from '../server/notify/push';
+import type { Notifier } from '../server/notify/notifier';
 import { runMigrations } from '../server/lib/migrate';
 import { seedProjects } from '../server/seed/apply';
 import { hashPassword } from '../server/lib/passwords';
@@ -21,6 +23,8 @@ export const PASSWORD = 'TestPassword123';
 export interface Ctx {
   pool: pg.Pool;
   app: ReturnType<typeof createApp>;
+  notifier: Notifier;
+  cfg: AppConfig;
   uploadDir: string;
   projects: { p1: string; p2: string };
   users: Record<string, string>;
@@ -37,15 +41,15 @@ export interface Agent {
   csrf: string;
 }
 
-export async function setup(): Promise<Ctx> {
+export async function setup(opts: { pushSender?: PushSender; cfg?: Partial<AppConfig> } = {}): Promise<Ctx> {
   process.env.NODE_ENV = 'test';
   const pool = createPool(TEST_DB);
   await pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
   await runMigrations(pool, path.resolve('migrations'), () => undefined);
   await seedProjects(pool, () => undefined);
   const uploadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sh-uploads-'));
-  const cfg = loadConfig({ databaseUrl: TEST_DB, uploadDir, cookieSecure: false, nodeEnv: 'test', staticDir: '/nonexistent', maxUploadMb: 1 });
-  const app = createApp(pool, cfg);
+  const cfg = loadConfig({ databaseUrl: TEST_DB, uploadDir, cookieSecure: false, nodeEnv: 'test', staticDir: '/nonexistent', maxUploadMb: 1, notifySchedulerEnabled: false, ...opts.cfg });
+  const app = createApp(pool, cfg, { pushSender: opts.pushSender });
 
   const pr = await pool.query('SELECT id, code FROM projects');
   const p1 = pr.rows.find((r) => r.code === 'PIN 70153699').id;
@@ -94,7 +98,7 @@ export async function setup(): Promise<Ctx> {
   };
 
   return {
-    pool, app, uploadDir, projects: { p1, p2 }, users, agent,
+    pool, app, notifier: app.locals.notifier as Notifier, cfg, uploadDir, projects: { p1, p2 }, users, agent,
     close: async () => {
       await pool.end();
       fs.rmSync(uploadDir, { recursive: true, force: true });

@@ -8,6 +8,8 @@ import { audit, diff } from '../audit';
 import { assertProjectMember, assertSameProject, getOwned, insertRow, patchOwned } from '../lib/crud';
 import { can } from '../permissions';
 import { CONSULTANT_VISIT_STATUSES, SITE_VISIT_STATUSES } from '../../shared/constants';
+import type { Notifier } from '../notify/notifier';
+import { consultantVisitEvents, siteVisitEvents } from '../notify/events';
 
 const uuidOrNull = z.preprocess((v) => (v === '' ? null : v), z.string().uuid().nullable()).optional();
 
@@ -70,7 +72,7 @@ export function canWriteSiteVisit(req: Request, visit: { assigned_user_id: strin
   return can(u.role, 'site.assigned') && visit.assigned_user_id === u.id;
 }
 
-export function visitRoutes(pool: pg.Pool) {
+export function visitRoutes(pool: pg.Pool, notifier: Notifier) {
   const r = Router({ mergeParams: true });
 
   // ======================= consultant visits
@@ -108,6 +110,7 @@ export function visitRoutes(pool: pg.Pool) {
       await audit(c, req, { projectId: pid, action: 'create', entityType: 'consultant_visit', entityId: v.id as string, summary: `Added consultant visit: ${body.purpose}`, after: v });
       return v;
     });
+    notifier.emit(consultantVisitEvents(null, row, u.id));
     res.status(201).json(row);
   });
 
@@ -124,9 +127,10 @@ export function visitRoutes(pool: pg.Pool) {
       const { before, after } = await patchOwned(c, 'consultant_visits', pid, id, body);
       const d = diff(before, after);
       await audit(c, req, { projectId: pid, action: 'update', entityType: 'consultant_visit', entityId: id, summary: `Edited consultant visit (${d.changed.join(', ')})`, before: d.before, after: d.after });
-      return after;
+      return { before, after };
     });
-    res.json(out);
+    notifier.emit(consultantVisitEvents(out.before, out.after, req.user!.id));
+    res.json(out.after);
   });
 
   // ======================= site visits
@@ -158,6 +162,7 @@ export function visitRoutes(pool: pg.Pool) {
       await audit(c, req, { projectId: pid, action: 'create', entityType: 'site_visit', entityId: v.id as string, summary: `Added site visit: ${body.purpose}`, after: v });
       return v;
     });
+    notifier.emit(siteVisitEvents(null, row, req.user!.id));
     res.status(201).json(row);
   });
 
@@ -179,9 +184,10 @@ export function visitRoutes(pool: pg.Pool) {
       const { before, after } = await patchOwned(c, 'site_visits', pid, id, patch);
       const d = diff(before, after);
       await audit(c, req, { projectId: pid, action: 'update', entityType: 'site_visit', entityId: id, summary: `Edited site visit (${d.changed.join(', ')})`, before: d.before, after: d.after });
-      return after;
+      return { before, after };
     });
-    res.json(out);
+    notifier.emit(siteVisitEvents(out.before, out.after, req.user!.id));
+    res.json(out.after);
   });
 
   // ======================= archive / restore

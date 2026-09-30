@@ -89,3 +89,26 @@ export const MISC_BASIS_LABELS: Record<MiscBasis, string> = {
 };
 
 export const NEEDS_CONFIRMATION = 'Needs confirmation';
+
+// ------------------------------------------------------------------ notifications
+/** Event categories a user can switch on/off (in-app list and push). */
+export const NOTIFICATION_EVENT_TYPES = [
+  'site_visit',
+  'consultant_visit',
+  'task_assigned',
+  'task_due',
+  'material_date',
+  'material_due',
+  'payment_due',
+] as const;
+export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPES)[number];
+
+export const NOTIFICATION_EVENT_LABELS: Record<NotificationEventType, { label: string; help: string }> = {
+  site_visit: { label: 'Site visits', help: 'A site visit is assigned to you or rescheduled.' },
+  consultant_visit: { label: 'Consultant visits', help: 'A consultant visit is assigned to you or rescheduled.' },
+  task_assigned: { label: 'Timeline task assigned', help: 'A timeline task is assigned to you.' },
+  task_due: { label: 'Timeline task due / overdue', help: 'A task you are responsible for is due within 3 days or overdue.' },
+  material_date: { label: 'Material delivery date changed', help: 'A delivery date on a material line you manage or supply changes.' },
+  material_due: { label: 'Material delivery due / overdue', help: 'A material delivery is due within 3 days or overdue.' },
+  payment_due: { label: 'Payment milestone due / overdue', help: 'Only for users with payment access.' },
+};

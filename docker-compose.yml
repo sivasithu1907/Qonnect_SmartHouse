@@ -46,6 +46,11 @@ services:
       APP_ORIGIN: ${APP_ORIGIN:-}
       APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Qatar}
       MIGRATE_ON_START: ${MIGRATE_ON_START:-false}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-}
+      PUSH_ALLOWED_HOSTS: ${PUSH_ALLOWED_HOSTS:-}
+      NOTIFY_SCHEDULER: ${NOTIFY_SCHEDULER:-true}
     volumes:
       - uploads:/data/uploads
     networks: [internal]

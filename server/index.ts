@@ -4,6 +4,8 @@ import { loadConfig } from './config';
 import { createPool } from './db';
 import { createApp } from './app';
 import { runMigrations } from './lib/migrate';
+import { startScheduler } from './notify/scheduler';
+import type { Notifier } from './notify/notifier';
 
 async function main() {
   const cfg = loadConfig();
@@ -15,9 +17,14 @@ async function main() {
   // purge expired sessions hourly
   setInterval(() => pool.query('DELETE FROM sessions WHERE expires_at < now()').catch(() => undefined), 3600_000).unref();
   const app = createApp(pool, cfg);
-  const server = app.listen(cfg.port, () => console.log(`Smart House API listening on :${cfg.port} (${cfg.nodeEnv})`));
+  const notifier = app.locals.notifier as Notifier;
+  const stopScheduler = cfg.notifySchedulerEnabled ? startScheduler(pool, notifier, cfg.timeZone) : () => undefined;
+  const server = app.listen(cfg.port, () => console.log(
+    `Smart House API listening on :${cfg.port} (${cfg.nodeEnv}); web push ${notifier.pushConfigured ? 'enabled' : 'not configured'}; due-date checks ${cfg.notifySchedulerEnabled ? 'on' : 'off'}`,
+  ));
   const shutdown = () => {
-    server.close(() => pool.end().finally(() => process.exit(0)));
+    stopScheduler();
+    server.close(() => notifier.flush().finally(() => pool.end().finally(() => process.exit(0))));
     setTimeout(() => process.exit(1), 10_000).unref();
   };
   process.on('SIGTERM', shutdown);

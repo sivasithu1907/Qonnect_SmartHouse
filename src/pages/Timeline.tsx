@@ -1,9 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import { CalendarDays, ChevronDown, ChevronRight, Link2, Paperclip, Pencil, Plus, ShieldCheck } from 'lucide-react';
 import { ApiError, patch, post } from '../lib/api';
-import { useApi } from '../lib/hooks';
+import { useApi, useFocusRecord } from '../lib/hooks';
 import { useSession } from '../lib/session';
-import type { MaterialItem, Phase, Project, Task, WorkUpdate } from '../lib/types';
+import type { FocusProps, Member, MaterialItem, Phase, Project, Task, WorkUpdate } from '../lib/types';
 import { formatDate, todayLocalISO } from '../lib/format';
 import { TASK_STATUSES } from '../../shared/constants';
 import { Attachments } from '../components/Attachments';
@@ -12,7 +12,7 @@ import { Badge, Button, Card, EmptyState, Modal, Notice, PageHeader, RecordForm,
 
 type Edit = { kind: 'task'; row: Task | null; phaseId?: string } | { kind: 'phase'; row: Phase | null } | { kind: 'update'; row: WorkUpdate | null };
 
-export function Timeline({ project }: { project: Project }) {
+export function Timeline({ project, focusId, onFocusHandled }: { project: Project } & FocusProps) {
   const base = `/api/projects/${project.id}/timeline`;
   const { data, error, reload } = useApi<{ phases: Phase[]; tasks: Task[] }>(base);
   const { data: updates, reload: reloadUpdates } = useApi<WorkUpdate[]>(`/api/projects/${project.id}/work-updates`);
@@ -20,8 +20,10 @@ export function Timeline({ project }: { project: Project }) {
   const { user, can } = useSession();
   const { toast, confirm } = useUi();
   const writable = can('timeline.write') && !project.archived_at;
+  const { data: members } = useApi<Member[]>(writable ? `/api/projects/${project.id}/members` : null);
   const canPost = can('workupdates.write') && !project.archived_at;
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  useFocusRecord(focusId, data?.tasks, (t) => t.id, (t) => setOpen((o) => ({ ...o, [t.phase_id]: true })), onFocusHandled);
   const [edit, setEdit] = useState<Edit | null>(null);
   const [filesFor, setFilesFor] = useState<string | null>(null);
 
@@ -38,7 +40,8 @@ export function Timeline({ project }: { project: Project }) {
     { name: 'description', label: 'Description', type: 'textarea' },
     { name: 'is_hold_point', label: 'Inspection / hold point (must pass before follow-on work)', type: 'checkbox', wide: true },
     { name: 'status', label: 'Status', type: 'select', options: TASK_STATUSES.filter((s) => row || s !== 'Completed').map((s) => ({ value: s, label: s })) },
-    { name: 'responsible', label: 'Responsible' },
+    { name: 'responsible', label: 'Responsible (name / company)' },
+    { name: 'assigned_user_id', label: 'Assigned user (receives task notifications)', type: 'select', nullable: true, options: (members ?? []).map((m) => ({ value: m.id, label: m.name })) },
     { name: 'planned_start', label: 'Planned start', type: 'date' },
     { name: 'planned_end', label: 'Planned finish', type: 'date' },
     { name: 'actual_start', label: 'Actual start', type: 'date' },
@@ -109,7 +112,7 @@ export function Timeline({ project }: { project: Project }) {
                         {tasks.map((t) => {
                           const waiting = t.depends_on.map((id) => taskById.get(id)).filter((d) => d && d.status !== 'Completed') as Task[];
                           return (
-                            <li key={t.id} className="py-2 flex items-start justify-between gap-2">
+                            <li key={t.id} id={`rec-${t.id}`} className="py-2 flex items-start justify-between gap-2">
                               <div className="min-w-0">
                                 <div className="flex flex-wrap items-center gap-1.5 text-xs">
                                   <span className="font-semibold text-slate-800">{t.name}</span>
@@ -120,6 +123,7 @@ export function Timeline({ project }: { project: Project }) {
                                   {t.planned_start || t.planned_end ? `Planned ${formatDate(t.planned_start)} → ${formatDate(t.planned_end)}` : 'No planned dates'}
                                   {t.actual_end && ` · Completed ${formatDate(t.actual_end)}`}
                                   {t.responsible && ` · ${t.responsible}`}
+                                  {t.assigned_user_name && ` · Assigned: ${t.assigned_user_name}`}
                                 </div>
                                 {t.depends_on.length > 0 && (
                                   <div className="text-[11px] mt-0.5 flex items-start gap-1 text-slate-500">

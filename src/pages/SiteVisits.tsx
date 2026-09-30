@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { Archive, FolderOpen, MapPin, Plus } from 'lucide-react';
 import { patch, post } from '../lib/api';
-import { useApi } from '../lib/hooks';
+import { useApi, useFocusRecord } from '../lib/hooks';
 import { useSession } from '../lib/session';
-import type { ConsultantVisit, Member, Project, SiteVisit } from '../lib/types';
+import type { FocusProps, ConsultantVisit, Member, Project, SiteVisit } from '../lib/types';
 import { formatDateTime } from '../lib/format';
 import { SITE_VISIT_STATUSES } from '../../shared/constants';
 import { Attachments } from '../components/Attachments';
@@ -11,7 +11,7 @@ import { VisitActions } from '../components/VisitActions';
 import { Badge, Button, Card, EmptyState, LinkButton, Modal, Notice, PageHeader, RecordForm, Spinner, StatusBadge, useUi, type FieldSpec } from '../components/ui';
 import { RestoreArchived, useLinkOptions } from './ConsultantVisits';
 
-export function SiteVisits({ project }: { project: Project }) {
+export function SiteVisits({ project, focusId, onFocusHandled }: { project: Project } & FocusProps) {
   const base = `/api/projects/${project.id}/visits`;
   const { data, error, reload } = useApi<SiteVisit[]>(`${base}/site`);
   const { user, can } = useSession();
@@ -22,6 +22,7 @@ export function SiteVisits({ project }: { project: Project }) {
   const { taskOptions, materialOptions, label } = useLinkOptions(project.id);
   const { toast, confirm } = useUi();
   const [edit, setEdit] = useState<{ row: SiteVisit | null } | null>(null);
+  useFocusRecord(focusId, data, (v) => v.id, (v) => setEdit({ row: v }), onFocusHandled);
 
   if (error) return <Notice tone="rose">{error}</Notice>;
   if (!data) return <Spinner />;
@@ -59,7 +60,7 @@ export function SiteVisits({ project }: { project: Project }) {
         {data.length === 0 ? <EmptyState>No site visits assigned.</EmptyState> : (
           <div className="divide-y divide-slate-100 -my-2">
             {data.map((v) => (
-              <div key={v.id} className="py-3 flex flex-col md:flex-row md:items-start justify-between gap-3">
+              <div key={v.id} id={`rec-${v.id}`} className="py-3 flex flex-col md:flex-row md:items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-semibold text-slate-900">{v.purpose}</span>

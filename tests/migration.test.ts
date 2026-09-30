@@ -78,8 +78,20 @@ describe('migration 002 on existing data', () => {
     expect(primer).toEqual([{ name: 'Windows & Doors' }]);
   });
 
+  it('003 only adds notification tables and a nullable task assignee; existing rows are untouched', async () => {
+    for (const t of ['push_subscriptions', 'notification_preferences', 'notification_project_mutes', 'notifications']) {
+      expect((await q(`SELECT count(*)::int n FROM ${t}`))[0].n).toBe(0);
+    }
+    expect((await q('SELECT count(*)::int n FROM budget_items'))[0].n).toBe(3);
+    expect((await q('SELECT count(*)::int n FROM material_items WHERE archived_at IS NULL'))[0].n).toBeGreaterThanOrEqual(5);
+    const col = await q(`SELECT is_nullable FROM information_schema.columns WHERE table_name = 'timeline_tasks' AND column_name = 'assigned_user_id'`);
+    expect(col).toEqual([{ is_nullable: 'YES' }]);
+  });
+
   it('is recorded once and not re-applied', async () => {
-    expect((await q('SELECT filename FROM schema_migrations ORDER BY 1')).map((r) => r.filename)).toEqual(['001_init.sql', '002_finalized_budget_and_categories.sql']);
+    expect((await q('SELECT filename FROM schema_migrations ORDER BY 1')).map((r) => r.filename)).toEqual([
+      '001_init.sql', '002_finalized_budget_and_categories.sql', '003_notifications_push.sql',
+    ]);
     expect(await runMigrations(pool, path.resolve('migrations'), () => undefined)).toEqual([]);
   });
 });

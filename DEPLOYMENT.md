@@ -178,6 +178,25 @@ docker compose up -d app
 ./scripts/smoke-test.sh http://127.0.0.1:8091
 ```
 
+### B8. Push notifications (optional, per stack)
+
+Push stays off until the stack has its own VAPID keys. The bell list works without them. Generate the keys **on the server** and write them straight into `.env`, so the private key is never shown or typed. Use separate keys for staging and production.
+
+```bash
+cd /opt/qonnect-smarthouse-staging            # or /opt/qonnect-smarthouse for production
+grep -q '^VAPID_PRIVATE_KEY=.' .env && echo "keys already set - leave them" || {
+  sed -i '/^VAPID_PUBLIC_KEY=/d;/^VAPID_PRIVATE_KEY=/d' .env
+  docker compose run --rm --no-deps -T app node dist-server/generate-vapid-keys.js | grep '^VAPID_P' >> .env
+}
+grep -q '^VAPID_SUBJECT=.' .env || { sed -i '/^VAPID_SUBJECT=/d' .env; echo 'VAPID_SUBJECT=mailto:YOUR-ADDRESS' >> .env; }
+nano .env                                     # replace YOUR-ADDRESS with a mailbox you monitor
+chmod 600 .env
+docker compose up -d app                      # recreates the app container with the new settings
+docker compose logs --tail=5 app              # expect: "web push enabled; due-date checks on"
+```
+
+Keep the keys once they are set: new keys mean every device has to enable push again. Web push and installation need a secure context. That means HTTPS on the public domain, or `http://localhost:8091` through the SSH tunnel, which only works on the computer running the tunnel. Phones therefore need the HTTPS Caddy route (C2).
+
 ---
 
 ## Part C — Later: production and the Caddy route (do not run yet)

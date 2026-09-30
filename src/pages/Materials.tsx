@@ -1,9 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import { Archive, Download, FolderOpen, Package, Pencil, Plus, RotateCcw, Tags, Truck } from 'lucide-react';
 import { patch, post } from '../lib/api';
-import { useApi } from '../lib/hooks';
+import { useApi, useFocusRecord } from '../lib/hooks';
 import { useSession } from '../lib/session';
-import type { CategoriesResponse, MaterialCategory, MaterialItem, Member, Project, ScopeNote } from '../lib/types';
+import type { FocusProps, CategoriesResponse, MaterialCategory, MaterialItem, Member, Project, ScopeNote } from '../lib/types';
 import { categoryOptions } from '../lib/options';
 import { ManageCategories } from '../components/ManageCategories';
 import { formatDate, formatQAR, todayLocalISO } from '../lib/format';
@@ -14,7 +14,7 @@ import { Badge, Button, Card, EmptyState, inputCls, Kpi, LinkButton, Modal, Need
 
 const CONTRACTOR_FIELDS = new Set(['status', 'vendor', 'planned_delivery_date', 'confirmed_delivery_date', 'revised_delivery_date', 'actual_delivery_date', 'qty_ordered', 'qty_delivered', 'next_follow_up_date', 'notes', 'document_url']);
 
-export function Materials({ project }: { project: Project }) {
+export function Materials({ project, focusId, onFocusHandled }: { project: Project } & FocusProps) {
   const base = `/api/projects/${project.id}/materials`;
   const [showArchived, setShowArchived] = useState(false);
   const { data, error, reload } = useApi<{ items: MaterialItem[]; scopeNotes: ScopeNote[] }>(`${base}${showArchived ? '?includeArchived=1' : ''}`);
@@ -27,6 +27,7 @@ export function Materials({ project }: { project: Project }) {
   const [catsOpen, setCatsOpen] = useState(false);
   const { toast, confirm } = useUi();
   const [edit, setEdit] = useState<{ row: MaterialItem | null } | null>(null);
+  useFocusRecord(focusId, data?.items, (m) => m.id, (m) => setEdit({ row: m }), onFocusHandled);
   const [scopeEdit, setScopeEdit] = useState<{ row: ScopeNote | null; category: MaterialCategory } | null>(null);
   const [cat, setCat] = useState('');
   const [status, setStatus] = useState('');
@@ -141,7 +142,7 @@ export function Materials({ project }: { project: Project }) {
                     const canEditRow = full || (contractor && m.assigned_contractor_id === user.id);
                     const rem = qtyRemaining(m.qty_ordered, m.qty_delivered);
                     return (
-                      <tr key={m.id} className={m.archived_at ? 'opacity-60' : ''}>
+                      <tr key={m.id} id={`rec-${m.id}`} className={m.archived_at ? 'opacity-60' : ''}>
                         <Td className="font-semibold text-slate-900 min-w-[170px]">{m.description}{m.is_package && <Badge tone="violet">Package</Badge>}{m.amount !== null && <div className="text-[11px] font-normal text-slate-500">{formatQAR(m.amount)}</div>}{m.archived_at && <Badge tone="rose">Archived</Badge>}</Td>
                         <Td>{m.quantity !== null ? `${m.quantity} ${m.unit}` : <span className="text-slate-400">—</span>}</Td>
                         <Td>{m.supply_responsibility === 'needs_confirmation' ? <NeedsConfirmation /> : <Badge tone={m.supply_responsibility === 'owner' ? 'sky' : 'indigo'}>{SUPPLY_RESPONSIBILITY_LABELS[m.supply_responsibility]}</Badge>}{m.responsibility_note && <div className="text-[10px] text-slate-500 mt-0.5">{m.responsibility_note}</div>}</Td>

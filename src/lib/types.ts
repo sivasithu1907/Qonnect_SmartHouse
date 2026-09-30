@@ -69,9 +69,12 @@ export interface Task {
   id: string; phase_id: string; template_key: string | null; name: string; description: string; is_hold_point: boolean;
   planned_start: string | null; planned_end: string | null; actual_start: string | null; actual_end: string | null;
   status: string; responsible: string; notes: string; sort_order: number; archived_at: string | null; depends_on: string[];
+  assigned_user_id: string | null; assigned_user_name: string | null;
 }
 export interface WorkUpdate { id: string; update_date: string; title: string; description: string; author_id: string; author_name: string | null; related_task_id: string | null; related_material_id: string | null; attachment_count: number }
 
 export interface AuditEntry { id: number; action: string; entity_type: string; entity_id: string | null; summary: string; before: any; after: any; user_email: string | null; created_at: string }
 
-export type Section = 'portfolio' | 'dashboard' | 'budget' | 'payments' | 'materials' | 'consultant' | 'site' | 'timeline' | 'audit' | 'users';
+export type Section = 'portfolio' | 'dashboard' | 'budget' | 'payments' | 'materials' | 'consultant' | 'site' | 'timeline' | 'audit' | 'users' | 'notifications';
+export interface FocusProps { focusId?: string | null; onFocusHandled?: () => void }
+export interface AppNotification { id: string; project_id: string; project_code: string; kind: string; event_type: string; title: string; body: string; url: string; read_at: string | null; created_at: string }

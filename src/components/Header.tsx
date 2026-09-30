@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Building2, CalendarDays, Check, ChevronDown, Coins, CreditCard, FolderOpen, History, Layers, LayoutDashboard, LogOut,
-  MapPin, Menu, Plus, Settings, Truck, UserCheck, Users, X, KeyRound,
+  MapPin, Menu, Plus, Settings, Truck, UserCheck, Users, X, KeyRound, Bell, Download,
 } from 'lucide-react';
+import { NotificationBell } from './NotificationBell';
+import { isStandalone } from '../lib/pwa';
 import type { Project, Section } from '../lib/types';
 import { useSession } from '../lib/session';
 import { ROLE_LABELS } from '../../shared/constants';
@@ -18,9 +20,10 @@ interface Props {
   onCreateProject: () => void;
   onProjectSettings: () => void;
   onChangePassword: () => void;
+  onInstallApp: () => void;
 }
 
-export function Header({ section, onNavigate, projects, current, onSelectProject, onCreateProject, onProjectSettings, onChangePassword }: Props) {
+export function Header({ section, onNavigate, projects, current, onSelectProject, onCreateProject, onProjectSettings, onChangePassword, onInstallApp }: Props) {
   const { user, can, logout } = useSession();
   const [open, setOpen] = useState(false);
   const [mobile, setMobile] = useState(false);
@@ -147,6 +150,7 @@ export function Header({ section, onNavigate, projects, current, onSelectProject
           </div>
 
           <div className="flex items-center gap-1">
+            <NotificationBell onOpenSettings={() => go('notifications')} />
             <div className="relative" ref={uref}>
               <button onClick={() => setUserMenu(!userMenu)} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-100">
                 <div className="w-7 h-7 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center text-xs font-bold">{user.name.slice(0, 1).toUpperCase()}</div>
@@ -161,6 +165,8 @@ export function Header({ section, onNavigate, projects, current, onSelectProject
                   {can('users.manage') && (
                     <button onClick={() => { go('users'); setUserMenu(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"><Users className="w-3.5 h-3.5" />Users & access</button>
                   )}
+                  <button onClick={() => { go('notifications'); setUserMenu(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"><Bell className="w-3.5 h-3.5" />Notifications</button>
+                  {!isStandalone() && <button onClick={() => { onInstallApp(); setUserMenu(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"><Download className="w-3.5 h-3.5" />Install app</button>}
                   <button onClick={() => { onChangePassword(); setUserMenu(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"><KeyRound className="w-3.5 h-3.5" />Change password</button>
                   <button onClick={logout} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-rose-700 hover:bg-rose-50"><LogOut className="w-3.5 h-3.5" />Sign out</button>
                 </div>

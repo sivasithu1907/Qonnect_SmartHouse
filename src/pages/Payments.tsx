@@ -1,9 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import { Archive, ChevronDown, ChevronRight, CreditCard, Download, FolderOpen, Paperclip, Pencil, Plus, RotateCcw } from 'lucide-react';
 import { ApiError, patch, post } from '../lib/api';
-import { useApi } from '../lib/hooks';
+import { useApi, useFocusRecord } from '../lib/hooks';
 import { useSession } from '../lib/session';
-import type { BudgetResponse, PaymentMilestone, PaymentsResponse, PaymentTransaction, Project } from '../lib/types';
+import type { FocusProps, BudgetResponse, PaymentMilestone, PaymentsResponse, PaymentTransaction, Project } from '../lib/types';
 import { formatDate, formatQAR, todayLocalISO } from '../lib/format';
 import { PAYEE_TYPE_LABELS, PAYEE_TYPES, PAYMENT_METHOD_LABELS, PAYMENT_METHODS } from '../../shared/constants';
 import { Attachments } from '../components/Attachments';
@@ -11,7 +11,7 @@ import { Badge, Button, Card, EmptyState, inputCls, Kpi, LinkButton, Modal, Noti
 
 type Edit = { kind: 'milestone'; row: PaymentMilestone | null } | { kind: 'tx'; milestone: PaymentMilestone; row: PaymentTransaction | null };
 
-export function Payments({ project }: { project: Project }) {
+export function Payments({ project, focusId, onFocusHandled }: { project: Project } & FocusProps) {
   const base = `/api/projects/${project.id}/payments`;
   const [showArchived, setShowArchived] = useState(false);
   const { data, error, reload } = useApi<PaymentsResponse>(`${base}${showArchived ? '?includeArchived=1' : ''}`);
@@ -20,6 +20,7 @@ export function Payments({ project }: { project: Project }) {
   const { toast, confirm } = useUi();
   const [edit, setEdit] = useState<Edit | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  useFocusRecord(focusId, data?.milestones, (m) => m.id, (m) => setOpen((o) => ({ ...o, [m.id]: true })), onFocusHandled);
   const [q, setQ] = useState('');
   const [payee, setPayee] = useState('');
   const [status, setStatus] = useState('');
@@ -120,7 +121,7 @@ export function Payments({ project }: { project: Project }) {
             <tbody className="divide-y divide-slate-100">
               {rows.map((m) => (
                 <React.Fragment key={m.id}>
-                  <tr className={`${m.archived_at ? 'opacity-60' : ''} hover:bg-slate-50/60`}>
+                  <tr id={`rec-${m.id}`} className={`${m.archived_at ? 'opacity-60' : ''} hover:bg-slate-50/60`}>
                     <Td><button onClick={() => setOpen((o) => ({ ...o, [m.id]: !o[m.id] }))} className="p-0.5 text-slate-500" aria-label="Toggle transfers">{open[m.id] ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}</button></Td>
                     <Td><div className="font-semibold text-slate-900">{m.payee_name}</div><div className="text-[11px] text-slate-500">{PAYEE_TYPE_LABELS[m.payee_type as keyof typeof PAYEE_TYPE_LABELS]}{m.cost_category ? ` · ${m.cost_category}` : ''}</div></Td>
                     <Td><div>{m.description}</div>{m.budget_item_name && <div className="text-[11px] text-slate-500">Budget: {m.budget_item_name}</div>}</Td>
