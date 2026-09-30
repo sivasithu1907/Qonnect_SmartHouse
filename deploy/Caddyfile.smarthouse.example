@@ -1,0 +1,36 @@
+# ---------------------------------------------------------------------------
+# Qonnect Smart House — Caddy site block (EXAMPLE, NOT APPLIED AUTOMATICALLY)
+#
+# Add this as a NEW site block only when you have chosen the subdomain and the
+# DNS record points to the server. Do not edit the Operations Monitor's block.
+# Validate before reloading:  caddy validate --config <your Caddyfile>
+# Caddy obtains the TLS certificate automatically for the hostname.
+# ---------------------------------------------------------------------------
+
+# ---- Option A: Caddy runs on the host, or in a container with network_mode: host
+<SUBDOMAIN> {
+	encode zstd gzip
+	request_body {
+		max_size 20MB          # keep >= MAX_UPLOAD_MB
+	}
+	reverse_proxy 127.0.0.1:8090 {
+		header_up X-Forwarded-Proto {scheme}
+	}
+}
+
+# ---- Option B: Caddy runs in its own container on a Docker bridge network
+# 127.0.0.1 inside the Caddy container is Caddy itself, so it cannot reach the
+# app's localhost port. Instead attach the Smart House app (not the database) to
+# Caddy's network using deploy/compose.caddy-network.example.yml, then use:
+#
+# <SUBDOMAIN> {
+# 	encode zstd gzip
+# 	request_body {
+# 		max_size 20MB
+# 	}
+# 	reverse_proxy qonnect-smarthouse-web:8080
+# }
+#
+# After the site block is live, set in the production .env:
+#   APP_ORIGIN=https://<SUBDOMAIN>
+# and run:  docker compose up -d app

@@ -1,0 +1,64 @@
+# Qonnect Smart House — one isolated stack per checkout (staging and production each have
+# their own .env, COMPOSE_PROJECT_NAME, database, network, volumes and localhost port).
+# It does not join, replace, restart or modify any other service (e.g. the Qonnect
+# Operations Monitor, its database, or Caddy).
+name: ${COMPOSE_PROJECT_NAME:?Set COMPOSE_PROJECT_NAME in .env}
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-smarthouse}
+      POSTGRES_USER: ${POSTGRES_USER:-smarthouse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [internal]
+    # No published port: the database is reachable only from the app container.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    image: ${COMPOSE_PROJECT_NAME:-qonnect-smarthouse}-app:${APP_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      # Credentials are passed as separate parts; the app URL-encodes them when connecting.
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-smarthouse}
+      DB_USER: ${POSTGRES_USER:-smarthouse}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      UPLOAD_DIR: /data/uploads
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-15}
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+      APP_ORIGIN: ${APP_ORIGIN:-}
+      APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Qatar}
+      MIGRATE_ON_START: ${MIGRATE_ON_START:-false}
+    volumes:
+      - uploads:/data/uploads
+    networks: [internal]
+    # Bound to localhost only; put your existing reverse proxy (TLS) in front of it.
+    ports:
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-8090}:8080"
+
+networks:
+  internal:
+    name: ${COMPOSE_PROJECT_NAME:-qonnect-smarthouse}_internal
+
+volumes:
+  pgdata:
+    name: ${COMPOSE_PROJECT_NAME:-qonnect-smarthouse}_pgdata
+  uploads:
+    name: ${COMPOSE_PROJECT_NAME:-qonnect-smarthouse}_uploads

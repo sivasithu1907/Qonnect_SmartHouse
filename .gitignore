@@ -1,0 +1,13 @@
+node_modules/
+dist/
+dist-server/
+build/
+coverage/
+data/
+backups/
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+compose.caddy-network.yml

@@ -1,0 +1,57 @@
+{
+  "name": "qonnect-smart-house",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Qonnect construction project control: budget, payments, material supply, visits and timeline (multi-project).",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n api,web \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "tsx watch --env-file-if-exists=.env server/index.ts",
+    "dev:web": "vite --port=3000 --host=0.0.0.0",
+    "build": "npm run build:web && npm run build:server",
+    "build:web": "vite build",
+    "build:server": "node scripts/build-server.mjs",
+    "start": "node dist-server/index.js",
+    "db:migrate": "tsx --env-file-if-exists=.env server/cli/migrate.ts",
+    "db:seed": "tsx --env-file-if-exists=.env server/cli/seed.ts",
+    "admin:create": "tsx --env-file-if-exists=.env server/cli/create-admin.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "npm run typecheck",
+    "test": "vitest run",
+    "clean": "rm -rf dist dist-server"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "express": "^5.2.1",
+    "helmet": "^8.3.0",
+    "multer": "^2.4.0",
+    "pg": "^8.23.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/cookie-parser": "^1.4.8",
+    "@types/express": "^5.0.3",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^22.14.0",
+    "@types/pg": "^8.15.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/supertest": "^6.0.3",
+    "@vitejs/plugin-react": "^6.1.1",
+    "concurrently": "^9.2.0",
+    "esbuild": "^0.28.2",
+    "lucide-react": "^0.546.0",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1",
+    "supertest": "^7.3.0",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.2"
+  }
+}

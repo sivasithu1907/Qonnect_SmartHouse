@@ -1,0 +1,20 @@
+# OPTIONAL override (Option B in deploy/Caddyfile.smarthouse.example) — use only when
+# Caddy runs in a container on a bridge network and you decide to publish the app.
+# It changes ONLY this Smart House stack: the app container additionally joins Caddy's
+# existing network under a stable alias. The database stays on the private network.
+#
+#   cp deploy/compose.caddy-network.example.yml compose.caddy-network.yml
+#   # replace <CADDY_NETWORK> with the network name found in DEPLOYMENT.md §C2
+#   docker compose -f docker-compose.yml -f compose.caddy-network.yml up -d app
+services:
+  app:
+    networks:
+      internal: {}
+      caddy:
+        aliases:
+          - ${COMPOSE_PROJECT_NAME}-web     # qonnect-smarthouse-web in production
+
+networks:
+  caddy:
+    external: true
+    name: <CADDY_NETWORK>
