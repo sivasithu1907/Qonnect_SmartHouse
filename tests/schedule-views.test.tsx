@@ -7,6 +7,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { MaterialSchedule } from '../src/components/schedule/MaterialSchedule';
 import { GanttChart } from '../src/components/schedule/GanttChart';
 import { mat, phase, task } from './schedule-fixtures';
+import { COLLAPSE_THRESHOLD, filterUnscheduled, type UnscheduledGroup } from '../src/components/schedule/UnscheduledPanel';
+import { containerCls, WIDE_SECTIONS } from '../src/lib/layout';
 
 const noop = () => undefined;
 const cats = [{ id: 'c1', name: 'Tiles', sort_order: 1, archived_at: null }, { id: 'c2', name: 'Sanitary ware', sort_order: 2, archived_at: null }];
@@ -45,8 +47,9 @@ describe('Material Supply — Schedule view', () => {
   });
 
   it('keeps undated lines in a labelled Not scheduled area', () => {
-    expect(t).toMatch(/Not scheduled \( ?1 ?\)/);
+    expect(t).toContain('Not scheduled — 1 line');
     expect(t).toContain('Basins');
+    expect(t).toContain('Basins Ordered Responsibility: needs confirmation'); // status + responsibility on the row
   });
 
   it('month view and empty states', () => {
@@ -54,7 +57,7 @@ describe('Material Supply — Schedule view', () => {
     expect(month).toContain('Oct 2026');
     const empty = text(renderToStaticMarkup(<MaterialSchedule items={[mat({ id: 'x' })]} categories={cats} today="2026-10-15" onOpen={noop} />));
     expect(empty).toContain('No material dates entered yet');
-    expect(empty).toMatch(/Not scheduled \( ?1 ?\)/);
+    expect(empty).toContain('Not scheduled — 1 line');
     const quiet = text(renderToStaticMarkup(<MaterialSchedule items={items} categories={cats} today="2026-10-15" onOpen={noop} initialAnchor="2026-12-01" />));
     expect(quiet).toContain('Nothing scheduled in this week');
     expect(quiet).toContain('Outside this week: 4 earlier · 0 later.');
@@ -106,7 +109,7 @@ describe('Project Timeline — Gantt view', () => {
 
   it('lists tasks without planned dates under Not scheduled', () => {
     const t = text(render());
-    expect(t).toMatch(/Not scheduled \( ?1 task ?\)/);
+    expect(t).toContain('Not scheduled — 1 task');
     expect(t).toContain('Painting');
   });
 
@@ -131,5 +134,51 @@ describe('Project Timeline — Gantt view', () => {
     const html = render({ initialIncludeMaterials: true });
     expect(html).not.toContain('draggable');
     expect(html).not.toContain('type="date"');
+  });
+});
+
+describe('Not scheduled list', () => {
+  const many = Array.from({ length: COLLAPSE_THRESHOLD + 3 }, (_, i) => task(`u${i}`, i % 2 ? 'p1' : 'p2', { name: `Unscheduled task ${i}` }));
+  const phases = [phase('p1', 1, { name: 'Setup' }), phase('p2', 2, { name: 'Finishing' })];
+
+  it('large lists start collapsed: phase sections with counts, no rows until expanded', () => {
+    const html = renderToStaticMarkup(<GanttChart phases={phases} tasks={many} materials={[]} today="2026-10-15" onOpenPhase={noop} onOpenTask={noop} onOpenMaterials={noop} />);
+    const t = text(html);
+    expect(t).toContain(`Not scheduled — ${many.length} tasks`);
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).not.toContain('data-testid="unscheduled-rows"');
+    expect(t).toMatch(/1\. Setup 7/);
+    expect(t).toMatch(/2\. Finishing 8/);
+    expect(html).toContain('placeholder="Search unscheduled tasks"');
+    expect(t).toContain('Expand all');
+  });
+
+  it('small lists start expanded as readable rows (not chips)', () => {
+    const html = renderToStaticMarkup(<GanttChart phases={phases} tasks={many.slice(0, 3)} materials={[]} today="2026-10-15" onOpenPhase={noop} onOpenTask={noop} onOpenMaterials={noop} />);
+    expect(html).toContain('aria-expanded="true"');
+    expect((html.match(/data-testid="unscheduled-rows"/g) ?? []).length).toBe(2);
+  });
+
+  it('search matches item names, details and group names, case-insensitively', () => {
+    const groups: UnscheduledGroup[] = [
+      { key: 'a', label: 'Tiles', searchLabel: 'Tiles', items: [{ id: '1', name: 'Floor tiles', searchText: 'Ordered Owner supply', onOpen: noop }, { id: '2', name: 'Grout', searchText: 'Not Ordered Contractor supply', onOpen: noop }] },
+      { key: 'b', label: 'Doors', searchLabel: 'Doors', items: [{ id: '3', name: 'Main door', searchText: 'Needs confirmation', onOpen: noop }] },
+      { key: 'c', label: 'Empty', searchLabel: 'Empty', items: [] },
+    ];
+    expect(filterUnscheduled(groups, '').map((g) => g.key)).toEqual(['a', 'b']);
+    expect(filterUnscheduled(groups, 'GROUT').flatMap((g) => g.items.map((i) => i.id))).toEqual(['2']);
+    expect(filterUnscheduled(groups, 'contractor').flatMap((g) => g.items.map((i) => i.id))).toEqual(['2']);
+    expect(filterUnscheduled(groups, 'doors').map((g) => g.items.length)).toEqual([1]);
+    expect(filterUnscheduled(groups, 'zzz')).toEqual([]);
+  });
+});
+
+describe('page width', () => {
+  it('Material Supply and Timeline use the fluid wide container; other pages keep the standard width', () => {
+    expect([...WIDE_SECTIONS].sort()).toEqual(['materials', 'timeline']);
+    expect(containerCls('materials')).toContain('max-w-[2400px]');
+    expect(containerCls('timeline')).toContain('max-w-[2400px]');
+    expect(containerCls('budget')).toContain('max-w-7xl');
+    expect(containerCls('dashboard')).toContain('max-w-7xl');
   });
 });

@@ -98,8 +98,8 @@ export function Timeline({ project, focusId, onFocusHandled }: { project: Projec
         </Card>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        {view === 'list' && <div className="xl:col-span-2 space-y-3">
+      <div className="grid grid-cols-1 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
+        {view === 'list' && <div className="xl:col-span-2 2xl:col-span-3 space-y-3">
           {data.phases.length === 0 && <EmptyState>No phases yet.</EmptyState>}
           {data.phases.map((p) => {
             const tasks = data.tasks.filter((t) => t.phase_id === p.id);
@@ -166,10 +166,10 @@ export function Timeline({ project, focusId, onFocusHandled }: { project: Projec
           })}
         </div>}
 
-        <Card className={view === 'gantt' ? 'xl:col-span-3' : ''} title="Contractor work updates" subtitle="Progress notes with supporting photos/documents"
+        <Card className={view === 'gantt' ? 'xl:col-span-3 2xl:col-span-4' : ''} title="Contractor work updates" subtitle="Progress notes with supporting photos/documents"
           actions={canPost && <Button size="sm" variant="primary" onClick={() => setEdit({ kind: 'update', row: null })}><Plus className="w-3.5 h-3.5" />Update</Button>}>
           {!updates ? <Spinner /> : updates.length === 0 ? <EmptyState /> : (
-            <ul className="space-y-3">
+            <ul className={view === 'gantt' ? 'grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-3' : 'space-y-3'}>
               {updates.map((u) => (
                 <li key={u.id} className="border border-slate-200 rounded-lg p-2.5">
                   <div className="flex items-start justify-between gap-2">

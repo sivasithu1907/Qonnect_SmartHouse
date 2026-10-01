@@ -93,3 +93,28 @@ Code only: `git checkout $(cat ~/smarthouse-staging-previous-commit.txt)`, set `
 - In week zoom the month name appears at the start of each month only, so when you scroll mid-month, use the day numbers or tooltips.
 - When several material lines fall in the same category on the same date in the Gantt, they share one marker with a count. The marker uses the first line's date kind, and the tooltip and click list show every line.
 - Phase rows without their own dates show a dashed line covering their scheduled tasks. This is for display only, and the phase dates stay blank.
+
+---
+
+# Update 4.1: layout and "Not scheduled" refinements
+
+- **Wider pages.** Material Supply and Project Timeline now use a fluid page width, up to 2400px, with responsive side padding (`src/lib/layout.ts`). The header and footer use the same width so everything lines up. Other pages keep the standard width.
+  - Notice text is capped at a readable line length.
+  - Dialogs and forms keep their own widths.
+  - On very wide screens, the Timeline list uses a 3 + 1 column split.
+  - In Gantt mode, contractor work updates are shown in columns.
+- **Not scheduled** is a shared panel with:
+  - the total count ("Not scheduled — 43 tasks");
+  - a search box covering name, status, responsibility, assignee and phase/category name;
+  - Expand all / Collapse all;
+  - one expandable section per phase or category, with its item count. Sections start collapsed when there are more than 12 items in total.
+
+  Expanded sections show readable rows: name, status, and supply responsibility (materials) or hold point and assignee (tasks). Clicking a row opens the existing edit form, or the read-only summary for read-only users.
+- **Compact empty states.** "No dates entered yet" and "Nothing scheduled in this week/month" are now single-line messages. The week/month message keeps the earlier/later counts and the Previous dated / Next dated buttons inline. When there are no dates at all, the Gantt's Today and scroll buttons are disabled.
+- **Controls and legends.** Legends wrap onto their own row on smaller screens. "Hide phases without dates" now says "(chart rows only)" and has a tooltip: hidden phases' tasks still appear under Not scheduled.
+- Date rules, filters, permissions and the List/Schedule/Gantt behaviour are unchanged. No data changes, no migration.
+
+Changed: `src/App.tsx`, `src/components/Header.tsx`, `src/components/ui.tsx` (notice text width), `src/components/schedule/MaterialSchedule.tsx`, `src/components/schedule/GanttChart.tsx`, `src/components/schedule/ScheduleMarks.tsx`, `src/pages/Timeline.tsx`, `tests/schedule-views.test.tsx`, this file.
+New: `src/lib/layout.ts`, `src/components/schedule/UnscheduledPanel.tsx`.
+
+Staging update: same steps as Update 4 (no migration).

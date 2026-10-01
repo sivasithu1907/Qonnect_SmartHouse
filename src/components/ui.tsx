@@ -120,7 +120,7 @@ export function Notice({ tone = 'amber', children, title }: { tone?: 'amber' | '
   return (
     <div className={`flex items-start gap-2 text-xs border rounded-lg p-3 ${styles}`}>
       <Icon className="w-4 h-4 shrink-0 mt-0.5" />
-      <div>{title && <span className="font-semibold">{title} </span>}{children}</div>
+      <div className="max-w-[120ch]">{title && <span className="font-semibold">{title} </span>}{children}</div>
     </div>
   );
 }

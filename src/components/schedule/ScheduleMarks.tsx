@@ -1,5 +1,5 @@
 import React from 'react';
-import { Check } from 'lucide-react';
+import { CalendarX2, Check } from 'lucide-react';
 import type { ExpectedDateKind } from '../../../shared/calc';
 import { expectedDeliveryDate } from '../../../shared/calc';
 import { formatDate } from '../../lib/format';
@@ -79,6 +79,20 @@ export function MaterialDateSummary({ m }: { m: MaterialItem }) {
         ))}
       </dl>
       {m.delivery_date_note && <div className="text-[11px] text-amber-800">{m.delivery_date_note}</div>}
+    </div>
+  );
+}
+
+/** One-line empty state for schedule areas (keeps navigation actions inline). */
+export function CompactEmpty({ title, children, actions }: { title: string; children?: React.ReactNode; actions?: React.ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border border-dashed border-slate-200 bg-slate-50/60 rounded-lg px-3 py-2" role="status">
+      <CalendarX2 className="w-4 h-4 text-slate-400 shrink-0" />
+      <div className="min-w-0 mr-auto text-xs">
+        <span className="font-semibold text-slate-700">{title}</span>
+        {children && <span className="text-slate-500"> — {children}</span>}
+      </div>
+      {actions && <div className="flex flex-wrap items-center gap-1">{actions}</div>}
     </div>
   );
 }

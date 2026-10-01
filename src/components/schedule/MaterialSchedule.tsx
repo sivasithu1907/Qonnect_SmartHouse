@@ -4,8 +4,9 @@ import type { MaterialCategory, MaterialItem } from '../../lib/types';
 import { formatDate } from '../../lib/format';
 import { SUPPLY_RESPONSIBILITY_LABELS } from '../../../shared/constants';
 import { buildMaterialSchedule, entriesInPeriod, periodFor, shiftPeriod, dowLabel, type MaterialEntry, type PeriodMode } from '../../lib/schedule';
-import { Badge, Button, EmptyState, NeedsConfirmation, StatusBadge, Tabs } from '../ui';
-import { Mark, MarkLegend } from './ScheduleMarks';
+import { Badge, Button, NeedsConfirmation, StatusBadge, Tabs } from '../ui';
+import { CompactEmpty, Mark, MarkLegend } from './ScheduleMarks';
+import { UnscheduledPanel, type UnscheduledGroup } from './UnscheduledPanel';
 
 interface Props {
   /** Already filtered by the page (category / status / responsibility / assigned / archived). */
@@ -35,11 +36,22 @@ export function MaterialSchedule({ items, categories, today, onOpen, initialMode
   const byCategory = (list: { item: MaterialItem }[]) =>
     categories.map((c) => ({ c, rows: list.filter((e) => e.item.category_id === c.id) })).filter((g) => g.rows.length);
   const groups = byCategory(win.visible);
-  const unschedGroups = categories.map((c) => ({ c, rows: unscheduled.filter((m) => m.category_id === c.id) })).filter((g) => g.rows.length);
+  const unschedGroups = useMemo<UnscheduledGroup[]>(() => categories.map((c) => ({
+    key: c.id,
+    label: c.name,
+    searchLabel: c.name,
+    items: unscheduled.filter((m) => m.category_id === c.id).map((m) => ({
+      id: m.id,
+      name: m.description,
+      searchText: `${m.status} ${SUPPLY_RESPONSIBILITY_LABELS[m.supply_responsibility]} ${m.vendor}`,
+      meta: <><StatusBadge status={m.status} /><Responsibility m={m} />{m.archived_at && <Badge tone="rose">Archived</Badge>}</>,
+      onOpen: () => onOpen(m),
+    })),
+  })), [categories, unscheduled, onOpen]);
 
   const week = mode === 'week';
-  const cols = `minmax(150px, 260px) repeat(${period.days.length}, minmax(${week ? 76 : 26}px, 1fr))`;
-  const minWidth = 200 + period.days.length * (week ? 76 : 26);
+  const cols = `minmax(128px, 260px) repeat(${period.days.length}, minmax(${week ? 76 : 26}px, 1fr))`;
+  const minWidth = 160 + period.days.length * (week ? 76 : 26);
 
   return (
     <div className="space-y-4">
@@ -52,19 +64,22 @@ export function MaterialSchedule({ items, categories, today, onOpen, initialMode
           <Button size="sm" aria-label={`Next ${mode}`} onClick={() => setAnchor(shiftPeriod(mode, anchor, 1))}><ChevronRight className="w-4 h-4" /></Button>
         </div>
         <div className="text-sm font-bold text-slate-900" data-testid="period-label">{period.label}</div>
-        <div className="w-full lg:w-auto lg:ml-auto"><MarkLegend /></div>
+        <div className="basis-full xl:basis-auto xl:ml-auto"><MarkLegend /></div>
       </div>
 
       {scheduled.length === 0 ? (
-        <EmptyState title="No material dates entered yet">
-          Lines appear here once a required-on-site, planned, supplier-confirmed, revised or actual delivery date is entered on the material line.
-        </EmptyState>
+        <CompactEmpty title="No material dates entered yet">
+          lines appear here once a required-on-site, planned, supplier-confirmed, revised or actual delivery date is entered on the line.
+        </CompactEmpty>
       ) : (
         <>
           {groups.length === 0 ? (
-            <EmptyState title={`Nothing scheduled in this ${mode}`}>
-              {win.before + win.after} dated line(s) fall outside this {mode}.
-            </EmptyState>
+            <CompactEmpty title={`Nothing scheduled in this ${mode}`} actions={<>
+              {win.prevDate && <Button size="sm" onClick={() => setAnchor(win.prevDate!)}><ChevronLeft className="w-3.5 h-3.5" />Previous dated</Button>}
+              {win.nextDate && <Button size="sm" onClick={() => setAnchor(win.nextDate!)}>Next dated<ChevronRight className="w-3.5 h-3.5" /></Button>}
+            </>}>
+              Outside this {mode}: {win.before} earlier · {win.after} later.
+            </CompactEmpty>
           ) : (
             <div className="overflow-x-auto -mx-4 sm:mx-0 border-y sm:border border-slate-200 sm:rounded-xl">
               <div className="grid text-xs" style={{ gridTemplateColumns: cols, minWidth }} role="grid" aria-label={`Material schedule, ${period.label}`}>
@@ -88,7 +103,7 @@ export function MaterialSchedule({ items, categories, today, onOpen, initialMode
               </div>
             </div>
           )}
-          {(win.before > 0 || win.after > 0) && (
+          {groups.length > 0 && (win.before > 0 || win.after > 0) && (
             <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
               <CalendarClock className="w-3.5 h-3.5" />
               <span>Outside this {mode}: {win.before} earlier · {win.after} later.</span>
@@ -100,29 +115,9 @@ export function MaterialSchedule({ items, categories, today, onOpen, initialMode
       )}
 
       {/* lines without any usable date — never auto-filled */}
-      <section aria-labelledby="mat-unscheduled" className="border border-dashed border-slate-300 rounded-xl p-3 bg-slate-50/50">
-        <h3 id="mat-unscheduled" className="text-sm font-bold text-slate-900">Not scheduled <span className="font-normal text-slate-500">({unscheduled.length})</span></h3>
-        <p className="text-[11px] text-slate-500 mb-2">No required-on-site, planned, confirmed, revised or actual delivery date has been entered. Open a line to add dates.</p>
-        {unscheduled.length === 0 ? <p className="text-xs text-slate-400">Every line shown has at least one date.</p> : (
-          <div className="space-y-2">
-            {unschedGroups.map(({ c, rows }) => (
-              <div key={c.id}>
-                <div className="text-[11px] font-bold text-slate-600 mb-1">{c.name}</div>
-                <ul className="flex flex-wrap gap-1.5">
-                  {rows.map((m) => (
-                    <li key={m.id}>
-                      <button type="button" onClick={() => onOpen(m)} className="text-left bg-white border border-slate-200 hover:border-sky-300 rounded-lg px-2 py-1 text-[11px] text-slate-700">
-                        <span className="font-semibold text-slate-800">{m.description}</span>
-                        <span className="text-slate-400"> · {m.status} · {SUPPLY_RESPONSIBILITY_LABELS[m.supply_responsibility]}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+      <UnscheduledPanel groups={unschedGroups} noun={['line', 'lines']} searchPlaceholder="Search unscheduled lines"
+        description="No required-on-site, planned, confirmed, revised or actual delivery date yet. Open a line to add dates."
+        emptyText="Every line shown has at least one date." />
     </div>
   );
 }

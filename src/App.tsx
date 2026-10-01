@@ -3,6 +3,7 @@ import { FolderOpen, Table } from 'lucide-react';
 import { get, post, setCsrfToken, setUnauthorizedHandler } from './lib/api';
 import { SessionContext, type Session } from './lib/session';
 import type { Project, Section, User } from './lib/types';
+import { containerCls } from './lib/layout';
 import { Header, projectLabel } from './components/Header';
 import { Login } from './components/Login';
 import { ChangePasswordModal, CreateProjectModal, ProjectSettingsModal } from './components/ProjectForms';
@@ -156,7 +157,7 @@ function Shell() {
         onInstallApp={() => setInstallOpen(true)}
       />
       <UpdateBanner />
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+      <main className={`flex-1 min-w-0 py-6 sm:py-8 ${containerCls(section)}`}>
         {section === 'portfolio' && <Portfolio key={refreshKey} onOpen={(id, s) => { setProjectId(id); setSection(s ?? 'dashboard'); }} onCreate={() => setCreateOpen(true)} />}
         {section === 'users' && <UsersAdmin projects={projects} />}
         {section === 'notifications' && <NotificationSettings projects={projects.filter((p) => !p.archived_at)} onInstallApp={() => setInstallOpen(true)} />}
@@ -175,7 +176,7 @@ function Shell() {
         )}
       </main>
       <footer className="border-t border-slate-200 bg-white py-5 text-xs text-slate-500 mt-auto">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className={`${containerCls(section)} flex flex-col sm:flex-row items-center justify-between gap-3`}>
           <span className="font-semibold text-slate-700">Qonnect{current ? ` · ${projectLabel(current)}` : ''}</span>
           {current && (
             <div className="flex items-center gap-3">

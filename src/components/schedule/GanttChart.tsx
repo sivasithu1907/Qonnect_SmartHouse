@@ -3,8 +3,9 @@ import { ChevronDown, ChevronLeft, ChevronRight, Link2, Package, ShieldCheck } f
 import type { MaterialCategory, MaterialItem, Phase, Task } from '../../lib/types';
 import { formatDate } from '../../lib/format';
 import { buildGantt, buildMaterialSchedule, dayNum, ganttRange, isoOf, spanDates, monthLabel, weekday, WEEK_START, type TaskSpan, type MaterialEntry } from '../../lib/schedule';
-import { Button, EmptyState, Tabs } from '../ui';
-import { Mark, MarkLegend } from './ScheduleMarks';
+import { Button, StatusBadge, Tabs } from '../ui';
+import { CompactEmpty, Mark, MarkLegend } from './ScheduleMarks';
+import { UnscheduledPanel, type UnscheduledGroup } from './UnscheduledPanel';
 
 type Zoom = 'week' | 'month';
 const PX_PER_DAY: Record<Zoom, number> = { week: 28, month: 6 };
@@ -145,25 +146,37 @@ export function GanttChart({ phases, tasks, materials, materialCategories, today
     }
   }
 
-  const unscheduledCount = model.unscheduled.reduce((n, g) => n + g.tasks.length, 0);
   const noDates = allDates.length === 0;
+  const unschedGroups = useMemo<UnscheduledGroup[]>(() => model.unscheduled.map(({ phase, tasks: list }) => ({
+    key: phase.id,
+    label: <><span className="font-mono text-sky-700 mr-1">{phase.seq}.</span>{phase.name}</>,
+    searchLabel: `${phase.seq}. ${phase.name}`,
+    items: list.map((t) => ({
+      id: t.id,
+      name: t.name,
+      searchText: `${t.status} ${t.assigned_user_name ?? ''} ${t.responsible}`,
+      meta: <><StatusBadge status={t.status} />{t.is_hold_point && <span className="inline-flex items-center gap-0.5 text-[10px] text-violet-700"><ShieldCheck className="w-3 h-3" />Hold point</span>}{(t.assigned_user_name || t.responsible) && <span className="text-[11px] text-slate-500">{t.assigned_user_name ?? t.responsible}</span>}</>,
+      onOpen: () => onOpenTask(t),
+    })),
+  })), [model, onOpenTask]);
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <Tabs value={zoom} onChange={setZoom} tabs={[{ id: 'week', label: 'Week' }, { id: 'month', label: 'Month' }]} />
         <div className="flex items-center gap-1">
-          <Button size="sm" aria-label="Scroll earlier" onClick={() => scrollBy(-1)}><ChevronLeft className="w-4 h-4" /></Button>
-          <Button size="sm" onClick={scrollToday}>Today</Button>
-          <Button size="sm" aria-label="Scroll later" onClick={() => scrollBy(1)}><ChevronRight className="w-4 h-4" /></Button>
+          <Button size="sm" aria-label="Scroll earlier" disabled={noDates} onClick={() => scrollBy(-1)}><ChevronLeft className="w-4 h-4" /></Button>
+          <Button size="sm" disabled={noDates} onClick={scrollToday}>Today</Button>
+          <Button size="sm" aria-label="Scroll later" disabled={noDates} onClick={() => scrollBy(1)}><ChevronRight className="w-4 h-4" /></Button>
         </div>
         <label className="flex items-center gap-1.5 text-xs text-slate-700">
           <input type="checkbox" checked={withMaterials} onChange={(e) => setWithMaterials(e.target.checked)} />Include material deliveries
         </label>
-        <label className="flex items-center gap-1.5 text-xs text-slate-700">
+        <label className="flex items-center gap-1.5 text-xs text-slate-700" title="Hides chart rows for phases that have no phase dates and no dated tasks. Their tasks stay listed under Not scheduled.">
           <input type="checkbox" checked={hideEmpty} onChange={(e) => setHideEmpty(e.target.checked)} />Hide phases without dates
+          <span className="text-[10px] text-slate-400 hidden sm:inline">(chart rows only)</span>
         </label>
-        <div className="w-full lg:w-auto lg:ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-600">
+        <div className="basis-full 2xl:basis-auto 2xl:ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-600">
           {(['Not Scheduled', 'Scheduled', 'In Progress', 'On Hold', 'Blocked', 'Completed'] as const).map((s) => (
             <span key={s} className="inline-flex items-center gap-1"><span className={`inline-block w-4 h-2.5 rounded-sm border ${barCls(s)}`} />{s}</span>
           ))}
@@ -173,9 +186,9 @@ export function GanttChart({ phases, tasks, materials, materialCategories, today
       {withMaterials && <MarkLegend />}
 
       {noDates ? (
-        <EmptyState title="No planned dates entered yet">
-          Tasks appear on the Gantt once a planned start or planned finish is entered in the task's edit form. Nothing is scheduled automatically.
-        </EmptyState>
+        <CompactEmpty title="No planned dates entered yet">
+          tasks appear here once a planned start or finish is entered in the task's edit form. Nothing is scheduled automatically.
+        </CompactEmpty>
       ) : (
         <div ref={scroller} className="overflow-x-auto -mx-4 sm:mx-0 border-y sm:border border-slate-200 sm:rounded-xl bg-white" data-testid="gantt-scroller">
           <div className="relative" style={{ width: LABEL + width, minHeight: HEADER + height }}>
@@ -230,31 +243,12 @@ export function GanttChart({ phases, tasks, materials, materialCategories, today
       )}
 
       {/* tasks with neither planned date — never auto-scheduled */}
-      <section aria-labelledby="gantt-unscheduled" className="border border-dashed border-slate-300 rounded-xl p-3 bg-slate-50/50">
-        <h3 id="gantt-unscheduled" className="text-sm font-bold text-slate-900">Not scheduled <span className="font-normal text-slate-500">({unscheduledCount} task{unscheduledCount === 1 ? '' : 's'})</span></h3>
-        <p className="text-[11px] text-slate-500 mb-2">These tasks have no planned start or finish. Open a task to enter its dates.</p>
-        {unscheduledCount === 0 ? <p className="text-xs text-slate-400">Every task has at least one planned date.</p> : (
-          <div className="space-y-2">
-            {model.unscheduled.map(({ phase, tasks: list }) => (
-              <div key={phase.id}>
-                <div className="text-[11px] font-bold text-slate-600 mb-1"><span className="font-mono text-sky-700">{phase.seq}.</span> {phase.name}</div>
-                <ul className="flex flex-wrap gap-1.5">
-                  {list.map((t) => (
-                    <li key={t.id}>
-                      <button type="button" onClick={() => onOpenTask(t)} className="bg-white border border-slate-200 hover:border-sky-300 rounded-lg px-2 py-1 text-[11px] text-slate-700 text-left">
-                        <span className="font-semibold text-slate-800">{t.name}</span><span className="text-slate-400"> · {t.status}{t.assigned_user_name ? ` · ${t.assigned_user_name}` : ''}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        )}
-        {withMaterials && mat.unscheduled.length > 0 && (
-          <p className="text-[11px] text-slate-500 mt-2"><Package className="w-3 h-3 inline -mt-0.5" /> {mat.unscheduled.length} material line(s) have no delivery or required-on-site date — see Material Supply › Schedule.</p>
-        )}
-      </section>
+      <UnscheduledPanel groups={unschedGroups} noun={['task', 'tasks']} searchPlaceholder="Search unscheduled tasks"
+        description="No planned start or finish yet. Open a task to enter its dates."
+        emptyText="Every task has at least one planned date."
+        footer={withMaterials && mat.unscheduled.length > 0
+          ? <><Package className="w-3 h-3 inline -mt-0.5" /> {mat.unscheduled.length} material line(s) have no delivery or required-on-site date — see Material Supply › Schedule.</>
+          : undefined} />
     </div>
   );
 }
