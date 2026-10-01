@@ -12,6 +12,16 @@ import { ROLE_LABELS } from '../../shared/constants';
 
 export const projectLabel = (p: Pick<Project, 'name' | 'code'>) => `${p.name} — ${p.code}`;
 
+/** The project menu shows a search box once the list is longer than this. */
+export const PROJECT_SEARCH_MIN = 6;
+/** Search by project name, code or location; active projects first, archived ones after. */
+export function filterProjects(projects: Project[], query: string): { active: Project[]; archived: Project[] } {
+  const q = query.trim().toLowerCase();
+  const hit = (p: Project) => !q || `${p.name} ${p.code} ${p.location}`.toLowerCase().includes(q);
+  const list = projects.filter(hit);
+  return { active: list.filter((p) => !p.archived_at), archived: list.filter((p) => p.archived_at) };
+}
+
 interface Props {
   section: Section;
   onNavigate: (s: Section) => void;
@@ -29,6 +39,8 @@ export function Header({ section, onNavigate, projects, current, onSelectProject
   const [open, setOpen] = useState(false);
   const [mobile, setMobile] = useState(false);
   const [userMenu, setUserMenu] = useState(false);
+  const [query, setQuery] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
   const ref = useRef<HTMLDivElement>(null);
   const uref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -36,9 +48,31 @@ export function Header({ section, onNavigate, projects, current, onSelectProject
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
       if (uref.current && !uref.current.contains(e.target as Node)) setUserMenu(false);
     };
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') { setOpen(false); setUserMenu(false); } };
     document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
+    document.addEventListener('keydown', k);
+    return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k); };
   }, []);
+  useEffect(() => { if (open) searchRef.current?.focus(); else setQuery(''); }, [open]);
+  const showSearch = projects.length >= PROJECT_SEARCH_MIN;
+  const groups = filterProjects(projects, query);
+  const projectOption = (p: Project) => {
+    const sel = p.id === current?.id;
+    return (
+      <button key={p.id} type="button" onClick={() => { onSelectProject(p.id); setOpen(false); }} aria-current={sel ? 'true' : undefined}
+        className={`w-full flex items-start justify-between px-3 py-2 text-left hover:bg-slate-50 ${sel ? 'bg-sky-50/80' : ''}`}>
+        <div className="flex items-start gap-2.5 min-w-0">
+          <Building2 className={`w-4 h-4 mt-0.5 shrink-0 ${sel ? 'text-sky-600' : 'text-slate-400'}`} />
+          <div className="min-w-0">
+            <div className="text-xs font-bold text-slate-900 truncate">{projectLabel(p)}</div>
+            <div className="text-[11px] text-slate-500 truncate">{p.location}{p.status ? ` · ${p.status}` : ''}</div>
+            {p.archived_at && <div className="text-[10px] font-semibold text-rose-700">Archived</div>}
+          </div>
+        </div>
+        {sel && <Check className="w-4 h-4 text-sky-600 shrink-0" aria-label="Current project" />}
+      </button>
+    );
+  };
 
   const nav: Array<{ id: Section; label: string; icon: React.FC<{ className?: string }>; show: boolean }> = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, show: true },
@@ -127,7 +161,7 @@ export function Header({ section, onNavigate, projects, current, onSelectProject
           <div className="order-3 w-full md:order-2 md:w-auto min-w-0 relative" ref={ref}>
             <div role="group" aria-label="Project"
               className="flex items-stretch h-12 md:h-11 min-w-0 bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
-              <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="listbox"
+              <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="true"
                 aria-label={current ? `Switch project. Current: ${current.name}, ${current.code}` : 'Select project'}
                 className="flex-1 md:flex-initial min-w-0 flex items-center gap-2.5 pl-1.5 pr-2.5 text-left hover:bg-slate-50">
                 <span className="w-8 h-8 shrink-0 rounded-lg bg-sky-50 border border-sky-100 text-sky-600 flex items-center justify-center"><Building2 className="w-4 h-4" /></span>
@@ -146,25 +180,19 @@ export function Header({ section, onNavigate, projects, current, onSelectProject
             {open && (
               <div className="absolute left-0 top-full mt-1.5 w-80 max-w-[calc(100vw-1.5rem)] bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-50">
                 <div className="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100">Switch project</div>
+                {showSearch && (
+                  <div className="px-2 pt-2">
+                    <label htmlFor="project-search" className="sr-only">Search projects by name or code</label>
+                    <input id="project-search" ref={searchRef} type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search name or code…"
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400" />
+                  </div>
+                )}
                 <div className="max-h-72 overflow-y-auto py-1">
                   {projects.length === 0 && <p className="px-3 py-2 text-xs text-slate-500">No projects assigned to you.</p>}
-                  {projects.map((p) => {
-                    const sel = p.id === current?.id;
-                    return (
-                      <button key={p.id} onClick={() => { onSelectProject(p.id); setOpen(false); }}
-                        className={`w-full flex items-start justify-between px-3 py-2 text-left hover:bg-slate-50 ${sel ? 'bg-sky-50/80' : ''}`}>
-                        <div className="flex items-start gap-2.5 min-w-0">
-                          <Building2 className={`w-4 h-4 mt-0.5 shrink-0 ${sel ? 'text-sky-600' : 'text-slate-400'}`} />
-                          <div className="min-w-0">
-                            <div className="text-xs font-bold text-slate-900 truncate">{projectLabel(p)}</div>
-                            <div className="text-[11px] text-slate-500 truncate">{p.location}{p.status ? ` · ${p.status}` : ''}</div>
-                            {p.archived_at && <div className="text-[10px] font-semibold text-rose-600">Archived</div>}
-                          </div>
-                        </div>
-                        {sel && <Check className="w-4 h-4 text-sky-600 shrink-0" />}
-                      </button>
-                    );
-                  })}
+                  {projects.length > 0 && groups.active.length + groups.archived.length === 0 && <p className="px-3 py-2 text-xs text-slate-500">No project matches “{query.trim()}”.</p>}
+                  {groups.active.map((p) => projectOption(p))}
+                  {groups.archived.length > 0 && <div className="px-3 pt-2 pb-1 text-[11px] font-bold uppercase tracking-wider text-slate-500">Archived (read-only)</div>}
+                  {groups.archived.map((p) => projectOption(p))}
                 </div>
                 <div className="pt-1 mt-1 border-t border-slate-100 px-2 space-y-1">
                   <button onClick={() => { go('portfolio'); setOpen(false); }} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 rounded-lg">

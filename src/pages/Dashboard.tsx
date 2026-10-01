@@ -6,6 +6,8 @@ import type { Project, Section } from '../lib/types';
 import { formatDate, formatDateTime, formatQAR } from '../lib/format';
 import { Button, Card, EmptyState, Kpi, LinkButton, NeedsConfirmation, Notice, PageHeader, Spinner, StatusBadge } from '../components/ui';
 import { CountBreakdown, GroupedBars, materialColor, MonthlyBars, ProgressRow } from '../components/charts';
+import { NeedsAttention, SetupChecklist } from '../components/ProjectHealth';
+import { buildAttention, buildSetupChecklist } from '../lib/projectHealth';
 
 export function Dashboard({ project, onNavigate, onSettings }: { project: Project; onNavigate: (s: Section) => void; onSettings: () => void }) {
   const { can } = useSession();
@@ -15,6 +17,9 @@ export function Dashboard({ project, onNavigate, onSettings }: { project: Projec
   const f = d.finance;
   const m = d.materials;
   const controlConfirmed = f && f.controlBudget !== null && f.controlBudgetConfirmed;
+  const setup = buildSetupChecklist(d, can);
+  const setupOpen = setup.length > 0 && setup.some((i) => !i.done);
+  const attention = buildAttention(d, { formatDate: (x) => formatDate(x), formatMoney: formatQAR });
 
   return (
     <div className="space-y-6">
@@ -30,7 +35,12 @@ export function Dashboard({ project, onNavigate, onSettings }: { project: Projec
         <span className="text-[11px] text-slate-400">External links — not synchronised with the app.</span>
       </div>
 
-      {f && !controlConfirmed && (
+      <div className={`grid grid-cols-1 gap-4 ${setupOpen ? 'xl:grid-cols-2' : ''}`}>
+        <NeedsAttention items={attention} />
+        {setupOpen && <SetupChecklist items={setup} onSettings={onSettings} onNavigate={onNavigate} />}
+      </div>
+
+      {f && !controlConfirmed && !setup.some((i) => i.key === 'control_budget') && (
         <Notice title="Control budget needs confirmation.">
           Budget items show only approved / finalized amounts, and items without one are marked Needs confirmation. Budget comparisons are kept in the linked Google Sheet. An admin must confirm the control budget in project settings.
         </Notice>

@@ -25,6 +25,9 @@ function materialStats(items: any[], today: string) {
     overdue: open.filter((m) => m.eff.date && m.eff.date < today).map(pick),
     partiallyDelivered: live.filter((m) => m.status === 'Partially Delivered').length,
     inspectionPending: live.filter((m) => m.status === 'Inspection Pending' || m.inspection_status === 'Pending').length,
+    // setup progress, from saved values only
+    responsibilityNeedsConfirmation: live.filter((m) => m.supply_responsibility === 'needs_confirmation').length,
+    withDate: withEff.filter((m) => m.actual_delivery_date || m.eff.date).length,
   };
 }
 
@@ -43,7 +46,8 @@ function timelineStats(t: Awaited<ReturnType<typeof loadTimeline>>) {
   });
   const total = t.tasks.length;
   const completed = t.tasks.filter((x) => x.status === 'Completed').length;
-  return { phases, total, completed, percent: total ? Math.round((completed / total) * 100) : 0, anyScheduleApproved: t.phases.some((p) => p.schedule_approved) };
+  const scheduled = t.tasks.filter((x) => x.planned_start || x.planned_end).length;
+  return { phases, total, completed, scheduled, percent: total ? Math.round((completed / total) * 100) : 0, anyScheduleApproved: t.phases.some((p) => p.schedule_approved) };
 }
 
 export async function projectDashboard(pool: pg.Pool, project: Record<string, any>, role: Parameters<typeof can>[0], timeZone: string) {
@@ -107,7 +111,7 @@ export async function projectDashboard(pool: pg.Pool, project: Record<string, an
   }
 
   return {
-    project: { id: pid, code: project.code, name: project.name, location: project.location, status: project.status, archived_at: project.archived_at },
+    project: { id: pid, code: project.code, name: project.name, location: project.location, status: project.status, archived_at: project.archived_at, hasDriveLink: !!project.drive_folder_url, hasSheetLink: !!project.sheets_url },
     today,
     finance,
     materials: { ...materialStats(materials.items, today), responsibility },

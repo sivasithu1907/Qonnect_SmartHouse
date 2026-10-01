@@ -57,3 +57,23 @@
     color: #0f172a; /* list items keep normal contrast */
   }
 }
+
+/* Keyboard focus: a clear ring on every interactive element (mouse clicks don't show it).
+   Text inputs keep their own focus style from the components. */
+@layer base {
+  a:focus-visible,
+  button:focus-visible,
+  summary:focus-visible,
+  [role='button']:focus-visible,
+  [tabindex]:not([tabindex='-1']):focus-visible,
+  input[type='checkbox']:focus-visible,
+  input[type='radio']:focus-visible {
+    outline: 2px solid #0284c7; /* sky-600 */
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  select:focus-visible {
+    outline: 2px solid #0284c7;
+    outline-offset: 1px;
+  }
+}
