@@ -6,6 +6,7 @@
  *   - /api/* is never intercepted or cached: no project data, payments, uploads or any
  *     authenticated response is ever stored by the service worker.
  *   - No offline editing and no queued writes; non-GET requests pass straight through.
+ *   - Page loads always come from the network; if it is unreachable a small "Can't reach Qonnect" page is shown.
  * Push:
  *   - Shows the generic notification sent by the server and opens the in-app link on tap.
  *     The app then requires the normal login and permission checks before showing details.
@@ -58,19 +59,20 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/api/')) return; // never touch API traffic
 
-  // App navigation: network first so users always get the latest shell; cached shell when offline.
+  // App navigation: always from the network. When the server can't be reached, show a clear
+  // offline page instead of an old cached shell (Qonnect has no offline mode and an old shell can
+  // reference build files that are not cached, which shows a blank page).
   if (req.mode === 'navigate') {
     event.respondWith((async () => {
       try {
         const fresh = await fetch(req);
         if (fresh.ok && (fresh.headers.get('content-type') || '').includes('text/html')) {
           const cache = await caches.open(SHELL_CACHE);
-          await cache.put('/', fresh.clone());
+          await cache.put('/', fresh.clone()); // kept only to know which build files are current
         }
         return fresh;
       } catch {
-        const cached = await caches.match('/', { cacheName: SHELL_CACHE });
-        return cached || new Response('<h1>Offline</h1><p>Qonnect needs a connection. Please reconnect and reload.</p>', { status: 503, headers: { 'Content-Type': 'text/html' } });
+        return offlinePage(req.url);
       }
     })());
     return;
@@ -94,12 +96,29 @@ self.addEventListener('fetch', (event) => {
     event.respondWith((async () => {
       const cache = await caches.open(SHELL_CACHE);
       const hit = await cache.match(url.pathname);
-      const refresh = fetch(req).then((res) => { if (res.ok) cache.put(url.pathname, res.clone()); return res; }).catch(() => hit);
+      const refresh = fetch(req).then((res) => { if (res.ok) cache.put(url.pathname, res.clone()); return res; }).catch(() => hit || Response.error());
       return hit || refresh;
     })());
   }
   // everything else: default network behaviour, not cached
 });
+
+function offlinePage(url) {
+  // a changed query string forces a real page load (a same-URL link with only a #hash would not reload)
+  const retry = new URL(url);
+  retry.searchParams.set('retry', String(Date.now()));
+  const href = retry.href.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Qonnect — can't connect</title>
+<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f8fafc;color:#0f172a;font-family:'Plus Jakarta Sans',system-ui,sans-serif}
+main{max-width:420px;margin:24px;padding:28px;background:#fff;border:1px solid #e2e8f0;border-radius:16px;text-align:center}
+img{width:48px;height:48px}h1{font-size:18px;margin:12px 0 6px}p{font-size:14px;color:#475569;line-height:1.5;margin:0 0 18px}
+a{display:inline-block;padding:10px 18px;border-radius:10px;background:#0284c7;color:#fff;font-weight:600;font-size:14px;text-decoration:none}</style></head>
+<body><main><img src="/icons/icon-192.png" alt=""><h1>Can't reach Qonnect</h1>
+<p>The server didn't respond. Check your internet connection (or, for staging, that the SSH tunnel is open), then try again.</p>
+<a href="${href}">Try again</a></main></body></html>`;
+  return new Response(html, { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+}
 
 // ------------------------------------------------------------------ push
 self.addEventListener('push', (event) => {
