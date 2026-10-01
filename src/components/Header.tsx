@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { containerCls } from '../lib/layout';
+import { PAGE_CONTAINER } from '../lib/layout';
 import {
   Building2, CalendarDays, Check, ChevronDown, Coins, CreditCard, FolderOpen, History, Layers, LayoutDashboard, LogOut,
   MapPin, Menu, Plus, Settings, Truck, UserCheck, Users, X, KeyRound, Bell, Download,
@@ -71,7 +71,7 @@ export function Header({ section, onNavigate, projects, current, onSelectProject
 
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-2xs">
-      <div className={containerCls(section)}>
+      <div className={PAGE_CONTAINER}>
         <div className="flex items-center justify-between h-16 gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <button onClick={() => go('portfolio')} title="Qonnect — all projects" className="flex items-center gap-2 shrink-0 rounded-lg hover:opacity-90">

@@ -53,7 +53,7 @@ export function PageHeader({ title, subtitle, actions, icon }: { title: string; 
         {icon && <div className="w-10 h-10 rounded-xl bg-sky-50 border border-sky-100 flex items-center justify-center text-sky-600 shrink-0">{icon}</div>}
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">{title}</h1>
-          {subtitle && <div className="text-xs sm:text-sm text-slate-500 mt-1">{subtitle}</div>}
+          {subtitle && <div className="text-xs sm:text-sm text-slate-500 mt-1 max-w-[100ch]">{subtitle}</div>}
         </div>
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}

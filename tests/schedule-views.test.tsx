@@ -8,7 +8,9 @@ import { MaterialSchedule } from '../src/components/schedule/MaterialSchedule';
 import { GanttChart } from '../src/components/schedule/GanttChart';
 import { mat, phase, task } from './schedule-fixtures';
 import { COLLAPSE_THRESHOLD, filterUnscheduled, type UnscheduledGroup } from '../src/components/schedule/UnscheduledPanel';
-import { containerCls, WIDE_SECTIONS } from '../src/lib/layout';
+import fs from 'node:fs';
+import path from 'node:path';
+import { PAGE_CONTAINER } from '../src/lib/layout';
 
 const noop = () => undefined;
 const cats = [{ id: 'c1', name: 'Tiles', sort_order: 1, archived_at: null }, { id: 'c2', name: 'Sanitary ware', sort_order: 2, archived_at: null }];
@@ -174,11 +176,15 @@ describe('Not scheduled list', () => {
 });
 
 describe('page width', () => {
-  it('Material Supply and Timeline use the fluid wide container; other pages keep the standard width', () => {
-    expect([...WIDE_SECTIONS].sort()).toEqual(['materials', 'timeline']);
-    expect(containerCls('materials')).toContain('max-w-[2400px]');
-    expect(containerCls('timeline')).toContain('max-w-[2400px]');
-    expect(containerCls('budget')).toContain('max-w-7xl');
-    expect(containerCls('dashboard')).toContain('max-w-7xl');
+  it('one shared near-full-width container is used by the header, banner, every page and the footer', () => {
+    expect(PAGE_CONTAINER).toContain('w-full');
+    expect(PAGE_CONTAINER).toContain('max-w-[2400px]');
+    for (const f of ['src/App.tsx', 'src/components/Header.tsx', 'src/components/UpdateBanner.tsx']) {
+      expect(fs.readFileSync(path.resolve(f), 'utf8')).toContain('PAGE_CONTAINER');
+    }
+    // no page keeps the old narrow 7xl page cap
+    const walk = (d: string): string[] => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));
+    const narrow = walk(path.resolve('src')).filter((f) => /\.tsx?$/.test(f) && fs.readFileSync(f, 'utf8').includes('max-w-7xl'));
+    expect(narrow).toEqual([]);
   });
 });

@@ -24,7 +24,7 @@ export function Portfolio({ onOpen, onCreate }: { onOpen: (id: string, s?: Secti
         actions={can('projects.manage') && <Button variant="primary" onClick={onCreate}><Plus className="w-4 h-4" />New project</Button>} />
       {error && <Notice tone="rose">{error}</Notice>}
       {!data ? <Spinner /> : data.length === 0 ? <EmptyState title="No projects">No projects are assigned to you.</EmptyState> : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4">
           {data.map((r) => (
             <div key={r.project.id} className={`bg-white rounded-xl border shadow-2xs p-5 ${r.project.archived_at ? 'border-dashed border-slate-300 opacity-75' : 'border-slate-200'}`}>
               <div className="flex items-start justify-between gap-3">
