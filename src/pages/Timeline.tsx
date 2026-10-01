@@ -8,8 +8,12 @@ import { formatDate, todayLocalISO } from '../lib/format';
 import { TASK_STATUSES } from '../../shared/constants';
 import { Attachments } from '../components/Attachments';
 import { labelOf, materialOptions, timelineTaskOptions } from '../lib/options';
-import { Badge, Button, Card, EmptyState, Modal, Notice, PageHeader, RecordForm, Spinner, StatusBadge, useUi, type FieldSpec } from '../components/ui';
+import { Badge, Button, Card, EmptyState, Modal, Notice, PageHeader, RecordForm, Spinner, StatusBadge, Tabs, useUi, type FieldSpec } from '../components/ui';
+import { GanttChart } from '../components/schedule/GanttChart';
+import { MaterialDateSummary } from '../components/schedule/ScheduleMarks';
+import { plannedSpan } from '../lib/schedule';
 
+type Detail = { kind: 'task'; row: Task } | { kind: 'phase'; row: Phase } | { kind: 'materials'; rows: MaterialItem[] };
 type Edit = { kind: 'task'; row: Task | null; phaseId?: string } | { kind: 'phase'; row: Phase | null } | { kind: 'update'; row: WorkUpdate | null };
 
 export function Timeline({ project, focusId, onFocusHandled }: { project: Project } & FocusProps) {
@@ -26,6 +30,8 @@ export function Timeline({ project, focusId, onFocusHandled }: { project: Projec
   useFocusRecord(focusId, data?.tasks, (t) => t.id, (t) => setOpen((o) => ({ ...o, [t.phase_id]: true })), onFocusHandled);
   const [edit, setEdit] = useState<Edit | null>(null);
   const [filesFor, setFilesFor] = useState<string | null>(null);
+  const [view, setView] = useState<'list' | 'gantt'>('list');
+  const [detail, setDetail] = useState<Detail | null>(null);
 
   const taskById = useMemo(() => new Map((data?.tasks ?? []).map((t) => [t.id, t])), [data]);
   if (error) return <Notice tone="rose">{error}</Notice>;
@@ -33,6 +39,11 @@ export function Timeline({ project, focusId, onFocusHandled }: { project: Projec
   const anyApproved = data.phases.some((p) => p.schedule_approved);
   const phaseOf = (t: Task) => data.phases.find((p) => p.id === t.phase_id);
   const taskOptions = timelineTaskOptions(data.phases, data.tasks);
+  // Gantt clicks: editors get the existing edit form; everyone else a read-only summary.
+  const openTask = (t: Task) => (writable ? setEdit({ kind: 'task', row: t }) : setDetail({ kind: 'task', row: t }));
+  const openPhase = (p: Phase) => (writable ? setEdit({ kind: 'phase', row: p }) : setDetail({ kind: 'phase', row: p }));
+  const goToMaterial = (m: MaterialItem) => { setDetail(null); window.location.hash = `#/materials/${project.id}/${m.id}`; };
+  const openMaterials = (rows: MaterialItem[]) => setDetail({ kind: 'materials', rows });
 
   const taskFields = (row: Task | null): FieldSpec[] => [
     { name: 'phase_id', label: 'Phase', type: 'select', required: true, options: data.phases.map((p) => ({ value: p.id, label: `${p.seq}. ${p.name}` })), wide: true },
@@ -72,14 +83,23 @@ export function Timeline({ project, focusId, onFocusHandled }: { project: Projec
       <PageHeader icon={<CalendarDays className="w-5 h-5" />} title="Project Timeline" subtitle={`${project.name} — ${project.code} · setup to handover`}
         actions={writable && <Button onClick={() => setEdit({ kind: 'phase', row: null })}><Plus className="w-4 h-4" />Phase</Button>} />
 
+      <Tabs value={view} onChange={setView} tabs={[{ id: 'list', label: 'List' }, { id: 'gantt', label: 'Gantt' }]} />
+
       {!anyApproved && (
         <Notice title="Planning template — not a confirmed construction schedule.">
           Phase names and dependencies are a standard sequence. Dates, responsibilities and statuses stay blank / Not Scheduled until an authorised user enters them. The consultant and contractor should adjust this template to the approved drawings and actual site conditions.
         </Notice>
       )}
 
+      {view === 'gantt' && (
+        <Card>
+          <GanttChart phases={data.phases} tasks={data.tasks} materials={mats?.items ?? []} today={todayLocalISO()}
+            onOpenPhase={openPhase} onOpenTask={openTask} onOpenMaterials={openMaterials} />
+        </Card>
+      )}
+
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <div className="xl:col-span-2 space-y-3">
+        {view === 'list' && <div className="xl:col-span-2 space-y-3">
           {data.phases.length === 0 && <EmptyState>No phases yet.</EmptyState>}
           {data.phases.map((p) => {
             const tasks = data.tasks.filter((t) => t.phase_id === p.id);
@@ -144,9 +164,9 @@ export function Timeline({ project, focusId, onFocusHandled }: { project: Projec
               </div>
             );
           })}
-        </div>
+        </div>}
 
-        <Card title="Contractor work updates" subtitle="Progress notes with supporting photos/documents"
+        <Card className={view === 'gantt' ? 'xl:col-span-3' : ''} title="Contractor work updates" subtitle="Progress notes with supporting photos/documents"
           actions={canPost && <Button size="sm" variant="primary" onClick={() => setEdit({ kind: 'update', row: null })}><Plus className="w-3.5 h-3.5" />Update</Button>}>
           {!updates ? <Spinner /> : updates.length === 0 ? <EmptyState /> : (
             <ul className="space-y-3">
@@ -212,6 +232,59 @@ export function Timeline({ project, focusId, onFocusHandled }: { project: Projec
             }} />
         )}
       </Modal>
+
+      <Modal open={!!detail} onClose={() => setDetail(null)}
+        title={detail?.kind === 'task' ? detail.row.name : detail?.kind === 'phase' ? `${detail.row.seq}. ${detail.row.name}` : 'Material deliveries'}
+        subtitle={detail?.kind === 'materials' ? 'Open a line in Material Supply to see or update it.' : 'Read-only'}>
+        {detail?.kind === 'task' && <TaskDetail t={detail.row} phase={phaseOf(detail.row)} taskById={taskById} />}
+        {detail?.kind === 'phase' && <PhaseDetail p={detail.row} tasks={data.tasks.filter((t) => t.phase_id === detail.row.id)} />}
+        {detail?.kind === 'materials' && (
+          <ul className="divide-y divide-slate-100">
+            {detail.rows.map((m) => (
+              <li key={m.id} className="py-2 space-y-1.5">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0"><div className="text-xs font-semibold text-slate-900">{m.description}</div><div className="text-[11px] text-slate-500">{m.category} · {m.status}</div></div>
+                  <Button size="sm" onClick={() => goToMaterial(m)}>Open in Material Supply</Button>
+                </div>
+                <MaterialDateSummary m={m} />
+              </li>
+            ))}
+          </ul>
+        )}
+      </Modal>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div className="text-xs"><span className="text-slate-500">{label}: </span><span className="text-slate-800">{children}</span></div>;
+}
+
+function TaskDetail({ t, phase, taskById }: { t: Task; phase?: Phase; taskById: Map<string, Task> }) {
+  const span = plannedSpan(t);
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-1.5"><StatusBadge status={t.status} />{t.is_hold_point && <Badge tone="violet"><ShieldCheck className="w-3 h-3" />Hold point</Badge>}</div>
+      {phase && <Field label="Phase">{phase.seq}. {phase.name}</Field>}
+      <Field label="Planned">{formatDate(t.planned_start)} → {formatDate(t.planned_end)}{span.kind === 'range' && ` (${span.days} day${span.days === 1 ? '' : 's'})`}</Field>
+      <Field label="Actual">{formatDate(t.actual_start)} → {formatDate(t.actual_end)}</Field>
+      <Field label="Assigned user">{t.assigned_user_name ?? '—'}</Field>
+      <Field label="Responsible">{t.responsible || '—'}</Field>
+      {t.depends_on.length > 0 && <Field label="After">{t.depends_on.map((id) => taskById.get(id)?.name ?? '—').join('; ')}</Field>}
+      {t.description && <p className="text-xs text-slate-600 whitespace-pre-wrap">{t.description}</p>}
+      {t.notes && <p className="text-xs text-slate-600 whitespace-pre-wrap">{t.notes}</p>}
+    </div>
+  );
+}
+
+function PhaseDetail({ p, tasks }: { p: Phase; tasks: Task[] }) {
+  return (
+    <div className="space-y-2">
+      <div>{p.schedule_approved ? <Badge tone="emerald">Schedule approved</Badge> : <Badge>Template</Badge>}</div>
+      <Field label="Planned">{formatDate(p.planned_start)} → {formatDate(p.planned_end)}</Field>
+      <Field label="Actual">{formatDate(p.actual_start)} → {formatDate(p.actual_end)}</Field>
+      <Field label="Tasks completed">{tasks.filter((t) => t.status === 'Completed').length}/{tasks.length}</Field>
+      {p.description && <p className="text-xs text-slate-600 whitespace-pre-wrap">{p.description}</p>}
     </div>
   );
 }

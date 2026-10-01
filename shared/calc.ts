@@ -142,6 +142,33 @@ export function qtyRemaining(ordered: number | string | null, delivered: number 
   return Math.round((o - d) * 1000) / 1000;
 }
 
+/** Kinds of expected delivery date, in precedence order. */
+export type ExpectedDateKind = 'revised' | 'confirmed' | 'planned' | 'required';
+export const EXPECTED_DATE_LABELS: Record<ExpectedDateKind, string> = {
+  revised: 'Revised delivery',
+  confirmed: 'Supplier-confirmed delivery',
+  planned: 'Planned delivery',
+  required: 'Required on site',
+};
+
+/**
+ * Expected delivery for a material line, WITHOUT the actual delivery (shown separately):
+ * revised > supplier-confirmed > planned > required-on-site. `kind` tells the UI which field the
+ * date came from, so a required-on-site date is never presented as a delivery confirmation.
+ */
+export function expectedDeliveryDate(m: {
+  revised_delivery_date: string | null;
+  confirmed_delivery_date: string | null;
+  planned_delivery_date: string | null;
+  required_on_site_date: string | null;
+}): { date: string; kind: ExpectedDateKind; label: string } | null {
+  const pick = (date: string | null, kind: ExpectedDateKind) => (date ? { date, kind, label: EXPECTED_DATE_LABELS[kind] } : null);
+  return pick(m.revised_delivery_date, 'revised')
+    ?? pick(m.confirmed_delivery_date, 'confirmed')
+    ?? pick(m.planned_delivery_date, 'planned')
+    ?? pick(m.required_on_site_date, 'required');
+}
+
 /** The delivery date that currently governs a material line (actual > revised > confirmed > planned > required). */
 export function effectiveDeliveryDate(m: {
   actual_delivery_date: string | null;

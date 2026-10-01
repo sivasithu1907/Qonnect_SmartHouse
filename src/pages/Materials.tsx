@@ -10,7 +10,9 @@ import { formatDate, formatQAR, todayLocalISO } from '../lib/format';
 import { INSPECTION_STATUSES, MATERIAL_STATUSES, SUPPLY_RESPONSIBILITIES, SUPPLY_RESPONSIBILITY_LABELS } from '../../shared/constants';
 import { effectiveDeliveryDate, isMaterialOpen, qtyRemaining } from '../../shared/calc';
 import { Attachments } from '../components/Attachments';
-import { Badge, Button, Card, EmptyState, inputCls, Kpi, LinkButton, Modal, NeedsConfirmation, Notice, PageHeader, RecordForm, Spinner, StatusBadge, Table, Td, Th, useUi, type FieldSpec } from '../components/ui';
+import { Badge, Button, Card, EmptyState, inputCls, Kpi, LinkButton, Modal, NeedsConfirmation, Notice, PageHeader, RecordForm, Spinner, StatusBadge, Table, Tabs, Td, Th, useUi, type FieldSpec } from '../components/ui';
+import { MaterialSchedule } from '../components/schedule/MaterialSchedule';
+import { MaterialDateSummary } from '../components/schedule/ScheduleMarks';
 
 const CONTRACTOR_FIELDS = new Set(['status', 'vendor', 'planned_delivery_date', 'confirmed_delivery_date', 'revised_delivery_date', 'actual_delivery_date', 'qty_ordered', 'qty_delivered', 'next_follow_up_date', 'notes', 'document_url']);
 
@@ -33,6 +35,7 @@ export function Materials({ project, focusId, onFocusHandled }: { project: Proje
   const [status, setStatus] = useState('');
   const [resp, setResp] = useState('');
   const [mine, setMine] = useState(false);
+  const [view, setView] = useState<'list' | 'schedule'>('list');
 
   const today = todayLocalISO();
   const items = useMemo(() => (data?.items ?? []).filter((m) =>
@@ -112,13 +115,17 @@ export function Materials({ project, focusId, onFocusHandled }: { project: Proje
 
       <Card>
         <div className="flex flex-wrap items-center gap-2 mb-4">
+          <Tabs value={view} onChange={setView} tabs={[{ id: 'list', label: 'List' }, { id: 'schedule', label: 'Schedule' }]} />
           <select className={`${inputCls} !w-auto`} value={cat} onChange={(e) => setCat(e.target.value)}><option value="">All categories</option>{categories.map((c) => <option key={c.id} value={c.id}>{c.name}{c.archived_at ? ' (archived)' : ''}</option>)}</select>
           <select className={`${inputCls} !w-auto`} value={status} onChange={(e) => setStatus(e.target.value)}><option value="">All statuses</option>{MATERIAL_STATUSES.map((s) => <option key={s}>{s}</option>)}</select>
           <select className={`${inputCls} !w-auto`} value={resp} onChange={(e) => setResp(e.target.value)}><option value="">All responsibilities</option>{SUPPLY_RESPONSIBILITIES.map((r) => <option key={r} value={r}>{SUPPLY_RESPONSIBILITY_LABELS[r]}</option>)}</select>
           {contractor && <label className="flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} />Assigned to me</label>}
           <label className="flex items-center gap-1.5 text-xs text-slate-600 ml-auto"><input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />Show archived</label>
         </div>
-        {grouped.length === 0 ? <EmptyState>{data.items.length ? 'No lines match the filters.' : 'No material lines yet.'}</EmptyState> : grouped.map((c) => {
+        {view === 'schedule' ? (
+          data.items.length === 0 ? <EmptyState>No material lines yet.</EmptyState>
+            : <MaterialSchedule items={items} categories={categories} today={today} onOpen={(m) => setEdit({ row: m })} />
+        ) : grouped.length === 0 ? <EmptyState>{data.items.length ? 'No lines match the filters.' : 'No material lines yet.'}</EmptyState> : grouped.map((c) => {
           const note = noteFor(c);
           return (
             <div key={c.id} className="mb-6 last:mb-0">
@@ -193,7 +200,15 @@ export function Materials({ project, focusId, onFocusHandled }: { project: Proje
                   }} />
               ) : (
                 <>
-                  <p className="text-xs text-slate-500">This line is not assigned to you, so it is read-only.</p>
+                  {contractor && <p className="text-xs text-slate-500">This line is not assigned to you, so it is read-only.</p>}
+                  {row && (
+                    <div className="space-y-2 border border-slate-200 rounded-lg p-3">
+                      <div className="flex flex-wrap items-center gap-1.5"><StatusBadge status={row.status} />
+                        {row.supply_responsibility === 'needs_confirmation' ? <NeedsConfirmation /> : <Badge tone={row.supply_responsibility === 'owner' ? 'sky' : 'indigo'}>{SUPPLY_RESPONSIBILITY_LABELS[row.supply_responsibility]}</Badge>}
+                        {row.vendor && <span className="text-xs text-slate-600">Vendor: {row.vendor}</span>}</div>
+                      <MaterialDateSummary m={row} />
+                    </div>
+                  )}
                   {row && <Attachments projectId={project.id} entityType="material" entityId={row.id} defaultKind="delivery_note" canUpload={false} onChange={reload} />}
                 </>
               )}
