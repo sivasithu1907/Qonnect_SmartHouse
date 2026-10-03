@@ -35,7 +35,7 @@ export function SetupChecklist({ items, onSettings, onNavigate }: { items: Setup
 }
 
 function SetupRow({ i, onSettings, onNavigate }: { i: SetupItem; onSettings: () => void; onNavigate: (s: Section) => void }) {
-  const act = () => (i.action.kind === 'settings' ? onSettings() : onNavigate(i.action.section));
+  const act = () => { if (i.action.kind === 'settings') onSettings(); else if (i.action.kind === 'section') onNavigate(i.action.section); };
   return (
     <li className="flex items-start gap-3 py-2.5">
       {i.done
@@ -48,11 +48,15 @@ function SetupRow({ i, onSettings, onNavigate }: { i: SetupItem; onSettings: () 
         </div>
         <div className="text-xs text-slate-600 mt-0.5">{i.detail}</div>
       </div>
-      {!i.done && (
+      {!i.done && (i.action.kind === 'href' ? (
+        <a href={i.action.href} className="shrink-0 min-h-9 inline-flex items-center px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-sky-700 hover:bg-sky-50 no-underline">
+          {i.actionLabel}
+        </a>
+      ) : (
         <button type="button" onClick={act} className="shrink-0 min-h-9 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-sky-700 hover:bg-sky-50">
           {i.actionLabel}
         </button>
-      )}
+      ))}
     </li>
   );
 }

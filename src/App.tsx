@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FolderOpen, Table } from 'lucide-react';
 import { get, post, setCsrfToken, setUnauthorizedHandler } from './lib/api';
-import { SessionContext, type Session } from './lib/session';
+import { SessionContext, useSession, type Session } from './lib/session';
+import { projectsForSelector } from './lib/projects';
 import type { Project, Section, User } from './lib/types';
 import { PAGE_CONTAINER } from './lib/layout';
 import { Header, projectLabel } from './components/Header';
@@ -25,6 +26,7 @@ import { detachDeviceOnLogout, syncSubscription } from './lib/push';
 
 const SECTIONS: Section[] = ['portfolio', 'dashboard', 'budget', 'payments', 'materials', 'consultant', 'site', 'timeline', 'audit', 'users', 'notifications'];
 const UUID = /^[0-9a-f-]{36}$/i;
+const FOCUS_FILTER = /^filter:[a-z-]{1,40}$/; // e.g. #/materials/<project>/filter:no-date
 
 /** Location hash: #/<section>/<projectId?>/<recordId?> — keeps selection across reloads; notification links add a record id. */
 function readHash(): { section: Section; projectId: string | null; focusId: string | null } {
@@ -32,7 +34,7 @@ function readHash(): { section: Section; projectId: string | null; focusId: stri
   return {
     section: SECTIONS.includes(s as Section) ? (s as Section) : 'dashboard',
     projectId: p && UUID.test(p) ? p : null,
-    focusId: f && UUID.test(f) ? f : null,
+    focusId: f && (UUID.test(f) || FOCUS_FILTER.test(f)) ? f : null,
   };
 }
 
@@ -72,6 +74,8 @@ export default function App() {
 }
 
 function Shell() {
+  const { can } = useSession();
+  const canManageProjects = can('projects.manage');
   const initial = readHash();
   const [section, setSection] = useState<Section>(initial.section);
   const [projectId, setProjectId] = useState<string | null>(initial.projectId);
@@ -138,7 +142,7 @@ function Shell() {
 
   if (!projects) return error ? <div className="p-8"><EmptyState title="Could not load projects">{error}</EmptyState></div> : <Spinner />;
 
-  const selectable = projects.filter((p) => !p.archived_at || p.id === current?.id);
+  const selectable = projectsForSelector(projects, canManageProjects, current?.id);
   const pageKey = `${current?.id}-${refreshKey}`;
   const needsProject = !['portfolio', 'users', 'notifications'].includes(section);
   const focusProps = { focusId, onFocusHandled: () => setFocusId(null) };

@@ -55,25 +55,6 @@ export function Header({ section, onNavigate, projects, current, onSelectProject
   }, []);
   useEffect(() => { if (open) searchRef.current?.focus(); else setQuery(''); }, [open]);
   const showSearch = projects.length >= PROJECT_SEARCH_MIN;
-  const groups = filterProjects(projects, query);
-  const projectOption = (p: Project) => {
-    const sel = p.id === current?.id;
-    return (
-      <button key={p.id} type="button" onClick={() => { onSelectProject(p.id); setOpen(false); }} aria-current={sel ? 'true' : undefined}
-        className={`w-full flex items-start justify-between px-3 py-2 text-left hover:bg-slate-50 ${sel ? 'bg-sky-50/80' : ''}`}>
-        <div className="flex items-start gap-2.5 min-w-0">
-          <Building2 className={`w-4 h-4 mt-0.5 shrink-0 ${sel ? 'text-sky-600' : 'text-slate-400'}`} />
-          <div className="min-w-0">
-            <div className="text-xs font-bold text-slate-900 truncate">{projectLabel(p)}</div>
-            <div className="text-[11px] text-slate-500 truncate">{p.location}{p.status ? ` · ${p.status}` : ''}</div>
-            {p.archived_at && <div className="text-[10px] font-semibold text-rose-700">Archived</div>}
-          </div>
-        </div>
-        {sel && <Check className="w-4 h-4 text-sky-600 shrink-0" aria-label="Current project" />}
-      </button>
-    );
-  };
-
   const nav: Array<{ id: Section; label: string; icon: React.FC<{ className?: string }>; show: boolean }> = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, show: true },
     { id: 'budget', label: 'Master Items & Budget', icon: Coins, show: can('budget.read') },
@@ -169,7 +150,7 @@ export function Header({ section, onNavigate, projects, current, onSelectProject
                   {current ? (
                     <>
                       <span className="text-sm font-bold text-slate-900 leading-tight truncate md:max-w-[22rem]">{current.name}</span>
-                      <span className="text-[11px] font-mono font-semibold text-sky-700 leading-tight tracking-wide">{current.code}{current.archived_at ? ' · archived' : ''}</span>
+                      <span className="flex items-center gap-1.5 leading-tight"><span className="text-[11px] font-mono font-semibold text-sky-700 tracking-wide">{current.code}</span>{current.archived_at && <span className="text-[10px] font-bold uppercase tracking-wide text-rose-700 bg-rose-50 border border-rose-200 rounded px-1">Archived · read-only</span>}</span>
                     </>
                   ) : <span className="text-sm font-semibold text-slate-600">Select project</span>}
                 </span>
@@ -188,11 +169,7 @@ export function Header({ section, onNavigate, projects, current, onSelectProject
                   </div>
                 )}
                 <div className="max-h-72 overflow-y-auto py-1">
-                  {projects.length === 0 && <p className="px-3 py-2 text-xs text-slate-500">No projects assigned to you.</p>}
-                  {projects.length > 0 && groups.active.length + groups.archived.length === 0 && <p className="px-3 py-2 text-xs text-slate-500">No project matches “{query.trim()}”.</p>}
-                  {groups.active.map((p) => projectOption(p))}
-                  {groups.archived.length > 0 && <div className="px-3 pt-2 pb-1 text-[11px] font-bold uppercase tracking-wider text-slate-500">Archived (read-only)</div>}
-                  {groups.archived.map((p) => projectOption(p))}
+                  <ProjectMenuList projects={projects} query={query} currentId={current?.id ?? null} onSelect={(id) => { onSelectProject(id); setOpen(false); }} />
                 </div>
                 <div className="pt-1 mt-1 border-t border-slate-100 px-2 space-y-1">
                   <button onClick={() => { go('portfolio'); setOpen(false); }} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 rounded-lg">
@@ -261,5 +238,43 @@ export function Header({ section, onNavigate, projects, current, onSelectProject
         </nav>
       )}
     </header>
+  );
+}
+
+/**
+ * Project list inside the selector: active projects first, then archived ones under their own
+ * heading, each clearly marked read-only. Only projects the server returned (and
+ * projectsForSelector allowed) are passed in.
+ */
+export function ProjectMenuList({ projects, query, currentId, onSelect }: { projects: Project[]; query: string; currentId: string | null; onSelect: (id: string) => void }) {
+  const groups = filterProjects(projects, query);
+  const option = (p: Project) => {
+    const sel = p.id === currentId;
+    return (
+      <button key={p.id} type="button" onClick={() => onSelect(p.id)} aria-current={sel ? 'true' : undefined}
+        aria-label={`${projectLabel(p)}${p.archived_at ? ' (archived, read-only)' : ''}${sel ? ' (current project)' : ''}`}
+        className={`w-full min-h-11 flex items-start justify-between gap-2 px-3 py-2 text-left hover:bg-slate-50 ${sel ? 'bg-sky-50/80' : ''}`}>
+        <span className="flex items-start gap-2.5 min-w-0">
+          <Building2 className={`w-4 h-4 mt-0.5 shrink-0 ${p.archived_at ? 'text-slate-400' : sel ? 'text-sky-600' : 'text-slate-500'}`} aria-hidden="true" />
+          <span className="min-w-0">
+            <span className={`block text-xs font-bold truncate ${p.archived_at ? 'text-slate-600' : 'text-slate-900'}`}>{projectLabel(p)}</span>
+            <span className="block text-[11px] text-slate-500 truncate">{p.location}{p.status ? ` · ${p.status}` : ''}</span>
+            {p.archived_at && <span className="inline-block mt-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-700 bg-rose-50 border border-rose-200 rounded px-1">Archived · read-only</span>}
+          </span>
+        </span>
+        {sel && <Check className="w-4 h-4 text-sky-600 shrink-0" aria-hidden="true" />}
+      </button>
+    );
+  };
+  const heading = (t: string) => <div role="presentation" className="px-3 pt-2 pb-1 text-[11px] font-bold uppercase tracking-wider text-slate-500">{t}</div>;
+  if (projects.length === 0) return <p className="px-3 py-2 text-xs text-slate-500">No projects assigned to you.</p>;
+  if (groups.active.length + groups.archived.length === 0) return <p className="px-3 py-2 text-xs text-slate-500">No project matches “{query.trim()}”.</p>;
+  return (
+    <>
+      {groups.archived.length > 0 && groups.active.length > 0 && heading('Active projects')}
+      {groups.active.map(option)}
+      {groups.archived.length > 0 && heading('Archived (read-only)')}
+      {groups.archived.map(option)}
+    </>
   );
 }

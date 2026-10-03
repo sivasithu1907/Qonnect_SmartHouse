@@ -25,6 +25,9 @@ describe('setup checklist', () => {
     expect(items.find((i) => i.key === 'responsibilities')!.progress).toBe('22 of 40');
     expect(items.find((i) => i.key === 'delivery_dates')!.progress).toBe('4 of 40');
     expect(items.find((i) => i.key === 'timeline')!.detail).toBe('47 task(s) have no planned start or finish.');
+    // incomplete material steps link straight to the lines that need attention
+    expect(items.find((i) => i.key === 'responsibilities')!.action).toEqual({ kind: 'href', href: '#/materials/p1/filter:responsibility' });
+    expect(items.find((i) => i.key === 'delivery_dates')!.action).toEqual({ kind: 'href', href: '#/materials/p1/filter:no-date' });
   });
 
   it('an entered but unconfirmed control budget is not complete', () => {
@@ -69,6 +72,7 @@ describe('needs attention', () => {
     expect(a[0]).toMatchObject({ tag: 'Overdue delivery', href: '#/materials/p1/m1', detail: 'Tiles · expected 2026-09-29 (Planned)' });
     expect(a[1]).toMatchObject({ tag: 'Overdue payment', href: '#/payments/p1/x1' });
     expect(a.find((i) => i.key === 'unsched')!.title).toBe('3 timeline task(s) without planned dates');
+    expect(a.find((i) => i.key === 'await')!.href).toBe('#/materials/p1/filter:awaiting');
     expect(a.every((i) => i.tag.length > 0)).toBe(true); // status is always spelled out, not colour only
   });
 
@@ -76,7 +80,7 @@ describe('needs attention', () => {
     const overdue = Array.from({ length: 7 }, (_, i) => ({ id: `m${i}`, description: `Line ${i}`, category: 'C', date: '2026-09-01', basis: 'Planned' }));
     const a = buildAttention(base({ finance: null, materials: { total: 7, awaitingConfirmation: 0, overdue }, timeline: { total: 0, scheduled: 0, phases: [] } }), { ...fmt, maxRecords: 4 });
     expect(a.filter((i) => /^mat-m\d/.test(i.key))).toHaveLength(4);
-    expect(a.find((i) => i.key === 'mat-more')).toMatchObject({ title: '3 more overdue deliveries', href: '#/materials/p1' });
+    expect(a.find((i) => i.key === 'mat-more')).toMatchObject({ title: '3 more overdue deliveries', href: '#/materials/p1/filter:overdue' });
     expect(a.some((i) => i.key.startsWith('pay'))).toBe(false);
   });
 

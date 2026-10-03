@@ -4,7 +4,7 @@ import { useApi } from '../lib/hooks';
 import { useSession } from '../lib/session';
 import type { Project, Section } from '../lib/types';
 import { formatDate, formatDateTime, formatQAR } from '../lib/format';
-import { Button, Card, EmptyState, Kpi, LinkButton, NeedsConfirmation, Notice, PageHeader, Spinner, StatusBadge } from '../components/ui';
+import { Button, Card, EmptyState, Kpi, LinkButton, NeedsConfirmation, Notice, PageHeader, Spinner } from '../components/ui';
 import { CountBreakdown, GroupedBars, materialColor, MonthlyBars, ProgressRow } from '../components/charts';
 import { NeedsAttention, SetupChecklist } from '../components/ProjectHealth';
 import { buildAttention, buildSetupChecklist } from '../lib/projectHealth';
@@ -108,26 +108,27 @@ export function Dashboard({ project, onNavigate, onSettings }: { project: Projec
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {f && (
-          <Card title="Upcoming & overdue payments" subtitle="Next 30 days">
-            {f.overduePayments.length === 0 && f.upcomingPayments.length === 0 ? <EmptyState /> : (
+          <Card title="Upcoming payments" subtitle="Due in the next 30 days">
+            <OverdueNote count={f.overduePayments.length} what="payment" />
+            {f.upcomingPayments.length === 0 ? <p className="text-xs text-slate-600">No payments due in the next 30 days.</p> : (
               <ul className="space-y-2">
-                {f.overduePayments.map((p: any) => (
-                  <li key={p.id} className="text-xs flex justify-between gap-2"><span><StatusBadge status="Overdue" /> {p.payee_name} — {p.description}<span className="text-slate-400"> · due {formatDate(p.due_date)}</span></span><span className="font-mono font-semibold text-rose-700">{formatQAR(p.pending)}</span></li>
-                ))}
                 {f.upcomingPayments.map((p: any) => (
-                  <li key={p.id} className="text-xs flex justify-between gap-2"><span>{p.payee_name} — {p.description}<span className="text-slate-400"> · due {formatDate(p.due_date)}</span></span><span className="font-mono font-semibold">{formatQAR(p.pending)}</span></li>
+                  <li key={p.id}><a href={`#/payments/${project.id}/${p.id}`} className="text-xs flex justify-between gap-2 rounded hover:bg-slate-50 no-underline text-slate-800"><span>{p.payee_name} — {p.description}<span className="text-slate-500"> · due {formatDate(p.due_date)}</span></span><span className="font-mono font-semibold">{formatQAR(p.pending)}</span></a></li>
                 ))}
               </ul>
             )}
           </Card>
         )}
-        <Card title="Materials due soon / overdue">
-          {m.overdue.length === 0 && m.dueSoon.length === 0 ? <EmptyState title="Nothing due in the next 14 days" /> : (
+        <Card title="Materials due soon" subtitle="Expected in the next 14 days">
+          <OverdueNote count={m.overdue.length} what="delivery" plural="deliveries" />
+          {m.dueSoon.length === 0 ? <p className="text-xs text-slate-600">Nothing expected in the next 14 days.</p> : (
             <ul className="space-y-2">
-              {[...m.overdue.map((x: any) => ({ ...x, late: true })), ...m.dueSoon].map((x: any) => (
-                <li key={x.id} className="text-xs flex justify-between gap-2">
-                  <span>{x.late && <StatusBadge status="Overdue" />} {x.description}<span className="text-slate-400"> · {x.category}</span></span>
-                  <span className="text-slate-600 whitespace-nowrap">{formatDate(x.date)} <span className="text-slate-400">({x.basis})</span></span>
+              {m.dueSoon.map((x: any) => (
+                <li key={x.id}>
+                  <a href={`#/materials/${project.id}/${x.id}`} className="text-xs flex justify-between gap-2 rounded hover:bg-slate-50 no-underline text-slate-800">
+                    <span>{x.description}<span className="text-slate-500"> · {x.category}</span></span>
+                    <span className="text-slate-700 whitespace-nowrap">{formatDate(x.date)} <span className="text-slate-500">({x.basis})</span></span>
+                  </a>
                 </li>
               ))}
             </ul>
@@ -143,5 +144,16 @@ export function Dashboard({ project, onNavigate, onSettings }: { project: Projec
         </Card>
       </div>
     </div>
+  );
+}
+
+/** One line pointing to the Needs attention list instead of repeating overdue records here. */
+function OverdueNote({ count, what, plural }: { count: number; what: string; plural?: string }) {
+  if (!count) return null;
+  return (
+    <p className="flex items-center gap-1.5 text-xs text-rose-700 mb-2">
+      <AlertTriangle className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+      <span><b>{count} overdue {count === 1 ? what : (plural ?? `${what}s`)}</b> — listed under Needs attention above.</span>
+    </p>
   );
 }

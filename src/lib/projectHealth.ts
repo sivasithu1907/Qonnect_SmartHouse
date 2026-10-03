@@ -23,7 +23,7 @@ export interface SetupItem {
   /** e.g. "12 of 19" — counts of saved records; null when not a counted item */
   progress: string | null;
   detail: string;
-  action: { kind: 'settings' } | { kind: 'section'; section: Section };
+  action: { kind: 'settings' } | { kind: 'section'; section: Section } | { kind: 'href'; href: string };
   actionLabel: string;
 }
 
@@ -61,14 +61,16 @@ export function buildSetupChecklist(d: DashboardData, can: Can): SetupItem[] {
       key: 'responsibilities', label: 'Assign supply responsibility', done: m.total > 0 && needs === 0,
       progress: m.total ? of(m.total - needs, m.total) : null,
       detail: m.total === 0 ? 'No material lines yet.' : needs ? `${needs} line(s) still marked Needs confirmation.` : 'Every line has an owner or contractor responsibility.',
-      action: { kind: 'section', section: 'materials' }, actionLabel: 'Open materials',
+      action: needs ? { kind: 'href', href: `#/materials/${d.project.id}/filter:responsibility` } : { kind: 'section', section: 'materials' },
+      actionLabel: needs ? 'Show these lines' : 'Open materials',
     });
     const dated = m.withDate ?? 0;
     items.push({
       key: 'delivery_dates', label: 'Enter material dates', done: m.total > 0 && dated >= m.total,
       progress: m.total ? of(dated, m.total) : null,
       detail: m.total === 0 ? 'No material lines yet.' : dated >= m.total ? 'Every line has a required-on-site or delivery date.' : `${m.total - dated} line(s) have no required-on-site or delivery date.`,
-      action: { kind: 'section', section: 'materials' }, actionLabel: 'Open materials',
+      action: m.total > dated ? { kind: 'href', href: `#/materials/${d.project.id}/filter:no-date` } : { kind: 'section', section: 'materials' },
+      actionLabel: m.total > dated ? 'Show these lines' : 'Open materials',
     });
   }
   if (can('timeline.write')) {
@@ -115,7 +117,7 @@ export function buildAttention(d: DashboardData, opts: { maxRecords?: number; fo
     key: `mat-${x.id}`, tone: 'overdue', tag: 'Overdue delivery', title: x.description,
     detail: `${x.category} · expected ${opts.formatDate(x.date)} (${x.basis})`, href: `#/materials/${pid}/${x.id}`,
   }));
-  more(od.length - max, 'overdue deliveries', `#/materials/${pid}`, 'mat-more');
+  more(od.length - max, 'overdue deliveries', `#/materials/${pid}/filter:overdue`, 'mat-more');
 
   const op = d.finance?.overduePayments ?? [];
   op.slice(0, max).forEach((x) => out.push({
@@ -126,7 +128,7 @@ export function buildAttention(d: DashboardData, opts: { maxRecords?: number; fo
 
   const blocked = d.timeline.phases.reduce((n, p) => n + (p.blocked ?? 0), 0);
   if (blocked) out.push({ key: 'blocked', tone: 'todo', tag: 'Blocked / on hold', title: `${blocked} timeline task(s) blocked or on hold`, detail: 'Check what is holding them up.', href: `#/timeline/${pid}` });
-  if (d.materials.awaitingConfirmation) out.push({ key: 'await', tone: 'todo', tag: 'Awaiting confirmation', title: `${d.materials.awaitingConfirmation} material line(s) awaiting confirmation`, detail: 'Status not confirmed, awaiting approval, quotation or supplier confirmation.', href: `#/materials/${pid}` });
+  if (d.materials.awaitingConfirmation) out.push({ key: 'await', tone: 'todo', tag: 'Awaiting confirmation', title: `${d.materials.awaitingConfirmation} material line(s) awaiting confirmation`, detail: 'Status not confirmed, awaiting approval, quotation or supplier confirmation.', href: `#/materials/${pid}/filter:awaiting` });
   const unsched = Math.max(0, d.timeline.total - (d.timeline.scheduled ?? 0));
   if (unsched) out.push({ key: 'unsched', tone: 'todo', tag: 'Not scheduled', title: `${unsched} timeline task(s) without planned dates`, detail: 'Open the Gantt view to see them by phase.', href: `#/timeline/${pid}` });
   return out;

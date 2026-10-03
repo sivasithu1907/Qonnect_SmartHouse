@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Archive, Download, FolderOpen, Package, Pencil, Plus, RotateCcw, Tags, Truck } from 'lucide-react';
 import { patch, post } from '../lib/api';
 import { useApi, useFocusRecord } from '../lib/hooks';
@@ -13,6 +13,7 @@ import { Attachments } from '../components/Attachments';
 import { Badge, Button, Card, EmptyState, inputCls, Kpi, LinkButton, Modal, NeedsConfirmation, Notice, PageHeader, RecordForm, Spinner, StatusBadge, Table, Tabs, Td, Th, useUi, type FieldSpec } from '../components/ui';
 import { MaterialSchedule } from '../components/schedule/MaterialSchedule';
 import { MaterialDateSummary } from '../components/schedule/ScheduleMarks';
+import { matchesQuickFilter, QUICK_FILTER_LABELS, QUICK_FILTERS, quickFilterCounts, quickFilterFromFocus, type QuickFilter } from '../lib/materialFilters';
 
 const CONTRACTOR_FIELDS = new Set(['status', 'vendor', 'planned_delivery_date', 'confirmed_delivery_date', 'revised_delivery_date', 'actual_delivery_date', 'qty_ordered', 'qty_delivered', 'next_follow_up_date', 'notes', 'document_url']);
 
@@ -29,7 +30,11 @@ export function Materials({ project, focusId, onFocusHandled }: { project: Proje
   const [catsOpen, setCatsOpen] = useState(false);
   const { toast, confirm } = useUi();
   const [edit, setEdit] = useState<{ row: MaterialItem | null } | null>(null);
-  useFocusRecord(focusId, data?.items, (m) => m.id, (m) => setEdit({ row: m }), onFocusHandled);
+  // #/materials/<project>/filter:<name> (dashboard links) opens a quick filter; a record id opens that line
+  const linkedFilter = quickFilterFromFocus(focusId);
+  const [quick, setQuick] = useState<QuickFilter>(linkedFilter ?? 'all');
+  useEffect(() => { if (linkedFilter) { setQuick(linkedFilter); onFocusHandled?.(); } }, [linkedFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  useFocusRecord(linkedFilter ? null : focusId, data?.items, (m) => m.id, (m) => setEdit({ row: m }), onFocusHandled);
   const [scopeEdit, setScopeEdit] = useState<{ row: ScopeNote | null; category: MaterialCategory } | null>(null);
   const [cat, setCat] = useState('');
   const [status, setStatus] = useState('');
@@ -39,7 +44,8 @@ export function Materials({ project, focusId, onFocusHandled }: { project: Proje
 
   const today = todayLocalISO();
   const items = useMemo(() => (data?.items ?? []).filter((m) =>
-    (!cat || m.category_id === cat) && (!status || m.status === status) && (!resp || m.supply_responsibility === resp) && (!mine || m.assigned_contractor_id === user.id)), [data, cat, status, resp, mine, user.id]);
+    (!cat || m.category_id === cat) && (!status || m.status === status) && (!resp || m.supply_responsibility === resp) && (!mine || m.assigned_contractor_id === user.id) && matchesQuickFilter(m, quick, today)), [data, cat, status, resp, mine, user.id, quick, today]);
+  const quickCounts = useMemo(() => quickFilterCounts(data?.items ?? [], today), [data, today]);
   // groups follow the centrally managed category order; archived categories still show their existing lines
   const categories = useMemo<MaterialCategory[]>(() => {
     const list = [...(catData?.material ?? [])].sort((a, b) => a.sort_order - b.sort_order);
@@ -122,10 +128,21 @@ export function Materials({ project, focusId, onFocusHandled }: { project: Proje
           {contractor && <label className="flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} />Assigned to me</label>}
           <label className="flex items-center gap-1.5 text-xs text-slate-600 ml-auto"><input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />Show archived</label>
         </div>
+        <div role="group" aria-label="Quick filters" className="flex flex-wrap items-center gap-1.5 -mt-1 mb-4">
+          {QUICK_FILTERS.map((f) => (
+            <button key={f} type="button" aria-pressed={quick === f} onClick={() => setQuick(f)}
+              className={`min-h-9 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold ${quick === f ? 'bg-sky-600 border-sky-600 text-white' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}>
+              {QUICK_FILTER_LABELS[f]}
+              <span className={`rounded-full px-1.5 text-[11px] ${quick === f ? 'bg-white/20' : 'bg-slate-100 text-slate-600'}`}>{f === 'all' ? quickCounts.all : quickCounts[f]}</span>
+            </button>
+          ))}
+          {quick === 'no-date' && <span className="text-[11px] text-slate-600">Open a line to enter its required-on-site or delivery dates. Supplier-confirmed dates are entered by an authorised user.</span>}
+          {quick === 'responsibility' && <span className="text-[11px] text-slate-600">Open a line to set owner or contractor supply.</span>}
+        </div>
         {view === 'schedule' ? (
           data.items.length === 0 ? <EmptyState>No material lines yet.</EmptyState>
             : <MaterialSchedule items={items} categories={categories} today={today} onOpen={(m) => setEdit({ row: m })} />
-        ) : grouped.length === 0 ? <EmptyState>{data.items.length ? 'No lines match the filters.' : 'No material lines yet.'}</EmptyState> : grouped.map((c) => {
+        ) : grouped.length === 0 ? <EmptyState>{!data.items.length ? 'No material lines yet.' : quick !== 'all' ? `No lines in “${QUICK_FILTER_LABELS[quick]}” with the current filters.` : 'No lines match the filters.'}</EmptyState> : grouped.map((c) => {
           const note = noteFor(c);
           return (
             <div key={c.id} className="mb-6 last:mb-0">
