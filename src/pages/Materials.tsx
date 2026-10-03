@@ -1,18 +1,19 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Archive, Download, FolderOpen, Package, Pencil, Plus, RotateCcw, Tags, Truck } from 'lucide-react';
+import { Download, FolderOpen, Plus, Tags, Truck } from 'lucide-react';
 import { patch, post } from '../lib/api';
 import { useApi, useFocusRecord } from '../lib/hooks';
 import { useSession } from '../lib/session';
 import type { FocusProps, CategoriesResponse, MaterialCategory, MaterialItem, Member, Project, ScopeNote } from '../lib/types';
 import { categoryOptions } from '../lib/options';
 import { ManageCategories } from '../components/ManageCategories';
-import { formatDate, formatQAR, todayLocalISO } from '../lib/format';
+import { todayLocalISO } from '../lib/format';
 import { INSPECTION_STATUSES, MATERIAL_STATUSES, SUPPLY_RESPONSIBILITIES, SUPPLY_RESPONSIBILITY_LABELS } from '../../shared/constants';
-import { effectiveDeliveryDate, isMaterialOpen, qtyRemaining } from '../../shared/calc';
+import { effectiveDeliveryDate, isMaterialOpen } from '../../shared/calc';
 import { Attachments } from '../components/Attachments';
-import { Badge, Button, Card, EmptyState, inputCls, Kpi, LinkButton, Modal, NeedsConfirmation, Notice, PageHeader, RecordForm, Spinner, StatusBadge, Table, Tabs, Td, Th, useUi, type FieldSpec } from '../components/ui';
+import { Badge, Button, Card, EmptyState, inputCls, Kpi, LinkButton, Modal, NeedsConfirmation, Notice, PageHeader, RecordForm, Spinner, StatusBadge, Tabs, useUi, type FieldSpec } from '../components/ui';
 import { MaterialSchedule } from '../components/schedule/MaterialSchedule';
 import { MaterialDateSummary } from '../components/schedule/ScheduleMarks';
+import { MaterialCategorySection, useWideLayout } from '../components/materials/MaterialCategorySection';
 import { matchesQuickFilter, QUICK_FILTER_LABELS, QUICK_FILTERS, quickFilterCounts, quickFilterFromFocus, type QuickFilter } from '../lib/materialFilters';
 
 const CONTRACTOR_FIELDS = new Set(['status', 'vendor', 'planned_delivery_date', 'confirmed_delivery_date', 'revised_delivery_date', 'actual_delivery_date', 'qty_ordered', 'qty_delivered', 'next_follow_up_date', 'notes', 'document_url']);
@@ -34,7 +35,10 @@ export function Materials({ project, focusId, onFocusHandled }: { project: Proje
   const linkedFilter = quickFilterFromFocus(focusId);
   const [quick, setQuick] = useState<QuickFilter>(linkedFilter ?? 'all');
   useEffect(() => { if (linkedFilter) { setQuick(linkedFilter); onFocusHandled?.(); } }, [linkedFilter]); // eslint-disable-line react-hooks/exhaustive-deps
-  useFocusRecord(linkedFilter ? null : focusId, data?.items, (m) => m.id, (m) => setEdit({ row: m }), onFocusHandled);
+  // expanded / collapsed categories; a user's choice wins over the automatic default
+  const [openMap, setOpenMap] = useState<Record<string, boolean>>({});
+  const wide = useWideLayout();
+  useFocusRecord(linkedFilter ? null : focusId, data?.items, (m) => m.id, (m) => { setOpenMap((o) => ({ ...o, [m.category_id]: true })); setEdit({ row: m }); }, onFocusHandled);
   const [scopeEdit, setScopeEdit] = useState<{ row: ScopeNote | null; category: MaterialCategory } | null>(null);
   const [cat, setCat] = useState('');
   const [status, setStatus] = useState('');
@@ -45,6 +49,7 @@ export function Materials({ project, focusId, onFocusHandled }: { project: Proje
   const today = todayLocalISO();
   const items = useMemo(() => (data?.items ?? []).filter((m) =>
     (!cat || m.category_id === cat) && (!status || m.status === status) && (!resp || m.supply_responsibility === resp) && (!mine || m.assigned_contractor_id === user.id) && matchesQuickFilter(m, quick, today)), [data, cat, status, resp, mine, user.id, quick, today]);
+  useEffect(() => { setOpenMap({}); }, [cat, status, resp, mine, quick, showArchived]);
   const quickCounts = useMemo(() => quickFilterCounts(data?.items ?? [], today), [data, today]);
   // groups follow the centrally managed category order; archived categories still show their existing lines
   const categories = useMemo<MaterialCategory[]>(() => {
@@ -99,6 +104,10 @@ export function Materials({ project, focusId, onFocusHandled }: { project: Proje
 
   const grouped = categories.filter((c) => items.some((m) => m.category_id === c.id));
   const noteFor = (c: MaterialCategory) => data.scopeNotes.find((n) => n.category_id === c.id);
+  // open everything when the list is short or filtered; otherwise start with compact category headers
+  const filtered = !!(cat || status || resp || mine || quick !== 'all');
+  const autoOpen = filtered || items.length <= 20 || grouped.length === 1;
+  const perms = { full, canEditRow: (m: MaterialItem) => full || (contractor && m.assigned_contractor_id === user.id) };
 
   return (
     <div className="space-y-6">
@@ -142,63 +151,25 @@ export function Materials({ project, focusId, onFocusHandled }: { project: Proje
         {view === 'schedule' ? (
           data.items.length === 0 ? <EmptyState>No material lines yet.</EmptyState>
             : <MaterialSchedule items={items} categories={categories} today={today} onOpen={(m) => setEdit({ row: m })} />
-        ) : grouped.length === 0 ? <EmptyState>{!data.items.length ? 'No material lines yet.' : quick !== 'all' ? `No lines in “${QUICK_FILTER_LABELS[quick]}” with the current filters.` : 'No lines match the filters.'}</EmptyState> : grouped.map((c) => {
-          const note = noteFor(c);
-          return (
-            <div key={c.id} className="mb-6 last:mb-0">
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2"><Package className="w-4 h-4 text-sky-600" />{c.name}{c.archived_at && <Badge tone="rose">Archived category</Badge>}</h3>
-                {full && <Button size="sm" variant="ghost" onClick={() => setScopeEdit({ row: note ?? null, category: c })}><Pencil className="w-3.5 h-3.5" />Scope notes</Button>}
+        ) : grouped.length === 0 ? <EmptyState>{!data.items.length ? 'No material lines yet.' : quick !== 'all' ? `No lines in “${QUICK_FILTER_LABELS[quick]}” with the current filters.` : 'No lines match the filters.'}</EmptyState> : (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-slate-600">{items.length} line{items.length === 1 ? '' : 's'} in {grouped.length} categor{grouped.length === 1 ? 'y' : 'ies'}</p>
+              <div className="flex items-center gap-1">
+                <Button size="sm" variant="ghost" className="min-h-9" onClick={() => setOpenMap(Object.fromEntries(grouped.map((c) => [c.id, true])))}>Expand all</Button>
+                <Button size="sm" variant="ghost" className="min-h-9" onClick={() => setOpenMap(Object.fromEntries(grouped.map((c) => [c.id, false])))}>Collapse all</Button>
               </div>
-              {note && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-2 text-[11px]">
-                  {note.owner_supply && <div className="bg-sky-50/60 border border-sky-100 rounded-lg p-2"><b className="text-sky-800">Owner supply:</b> {note.owner_supply}</div>}
-                  {note.contractor_scope && <div className="bg-indigo-50/60 border border-indigo-100 rounded-lg p-2"><b className="text-indigo-800">Contractor scope:</b> {note.contractor_scope}</div>}
-                  {note.source_label && <div className="text-slate-400 md:col-span-2">Source: {note.source_label}</div>}
-                </div>
-              )}
-              <Table>
-                <thead><tr><Th className="w-[190px]">Item</Th><Th>Qty</Th><Th>Responsibility</Th><Th>Vendor / assigned</Th><Th>Status</Th><Th>Required on site</Th><Th>Delivery</Th><Th>Ordered / delivered / remaining</Th><Th>Inspection</Th><Th>Follow-up</Th><Th /></tr></thead>
-                <tbody className="divide-y divide-slate-100">
-                  {items.filter((m) => m.category_id === c.id).map((m) => {
-                    const eff = effectiveDeliveryDate(m);
-                    const late = isMaterialOpen(m.status) && !m.actual_delivery_date && eff.date && eff.date < today;
-                    const canEditRow = full || (contractor && m.assigned_contractor_id === user.id);
-                    const rem = qtyRemaining(m.qty_ordered, m.qty_delivered);
-                    return (
-                      <tr key={m.id} id={`rec-${m.id}`} className={m.archived_at ? 'opacity-60' : ''}>
-                        <Td className="font-semibold text-slate-900 min-w-[170px]">{m.description}{m.is_package && <Badge tone="violet">Package</Badge>}{m.amount !== null && <div className="text-[11px] font-normal text-slate-500">{formatQAR(m.amount)}</div>}{m.archived_at && <Badge tone="rose">Archived</Badge>}</Td>
-                        <Td>{m.quantity !== null ? `${m.quantity} ${m.unit}` : <span className="text-slate-400">—</span>}</Td>
-                        <Td>{m.supply_responsibility === 'needs_confirmation' ? <NeedsConfirmation /> : <Badge tone={m.supply_responsibility === 'owner' ? 'sky' : 'indigo'}>{SUPPLY_RESPONSIBILITY_LABELS[m.supply_responsibility]}</Badge>}{m.responsibility_note && <div className="text-[10px] text-slate-500 mt-0.5">{m.responsibility_note}</div>}</Td>
-                        <Td>{m.vendor || <span className="text-slate-400">—</span>}{m.assigned_contractor_name && <div className="text-[10px] text-slate-500">Assigned: {m.assigned_contractor_name}</div>}</Td>
-                        <Td><StatusBadge status={m.status} /></Td>
-                        <Td className="whitespace-nowrap">{formatDate(m.required_on_site_date)}</Td>
-                        <Td className="text-[11px] whitespace-nowrap">
-                          {m.planned_delivery_date && <div>Planned {formatDate(m.planned_delivery_date)}</div>}
-                          {m.confirmed_delivery_date && <div>Confirmed {formatDate(m.confirmed_delivery_date)}</div>}
-                          {m.revised_delivery_date && <div>Revised {formatDate(m.revised_delivery_date)}</div>}
-                          {m.actual_delivery_date && <div className="text-emerald-700 font-semibold">Actual {formatDate(m.actual_delivery_date)}</div>}
-                          {m.delivery_date_note && <Badge tone="amber">{m.delivery_date_note}</Badge>}
-                          {!m.planned_delivery_date && !m.confirmed_delivery_date && !m.revised_delivery_date && !m.actual_delivery_date && !m.delivery_date_note && <span className="text-slate-400">—</span>}
-                          {late && <div><Badge tone="rose">Overdue</Badge></div>}
-                        </Td>
-                        <Td className="font-mono text-[11px]">{m.qty_ordered ?? '—'} / {m.qty_delivered ?? '—'} / {rem ?? '—'}</Td>
-                        <Td>{m.inspection_status || <span className="text-slate-400">—</span>}</Td>
-                        <Td className="whitespace-nowrap">{formatDate(m.next_follow_up_date)}</Td>
-                        <Td className="whitespace-nowrap text-right">
-                          <Button size="sm" variant="ghost" onClick={() => setEdit({ row: m })} title={canEditRow ? 'Edit / files' : 'View / files'}><Pencil className="w-3.5 h-3.5" />{m.attachment_count > 0 && <span className="text-[10px]">{m.attachment_count}</span>}</Button>
-                          {full && (m.archived_at
-                            ? <Button size="sm" variant="ghost" onClick={() => act(`${base}/${m.id}/restore`, 'Restored')}><RotateCcw className="w-3.5 h-3.5" /></Button>
-                            : <Button size="sm" variant="ghost" onClick={() => act(`${base}/${m.id}/archive`, 'Archived', <>Archive material line <b>{m.description}</b>?</>)}><Archive className="w-3.5 h-3.5" /></Button>)}
-                        </Td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </Table>
             </div>
-          );
-        })}
+            {grouped.map((c) => (
+              <MaterialCategorySection key={c.id} category={c} items={items.filter((m) => m.category_id === c.id)} note={noteFor(c)} today={today}
+                open={openMap[c.id] ?? autoOpen} onToggle={() => setOpenMap((o) => ({ ...o, [c.id]: !(o[c.id] ?? autoOpen) }))}
+                wide={wide} perms={perms} onOpenLine={(m) => setEdit({ row: m })}
+                onArchive={(m) => act(`${base}/${m.id}/archive`, 'Archived', <>Archive material line <b>{m.description}</b>?</>)}
+                onRestore={(m) => act(`${base}/${m.id}/restore`, 'Restored')}
+                onEditScope={full ? () => setScopeEdit({ row: noteFor(c) ?? null, category: c }) : undefined} />
+            ))}
+          </div>
+        )}
       </Card>
 
       <Modal open={!!edit} onClose={() => setEdit(null)} wide title={edit?.row ? `${edit.row.category} — ${edit.row.description}` : 'Add material line'}

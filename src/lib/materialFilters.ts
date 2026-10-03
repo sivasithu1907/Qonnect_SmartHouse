@@ -41,3 +41,14 @@ export function quickFilterFromFocus(focusId: string | null | undefined): QuickF
   const m = /^filter:([a-z-]+)$/.exec(focusId ?? '');
   return m && (QUICK_FILTERS as readonly string[]).includes(m[1]) ? (m[1] as QuickFilter) : null;
 }
+
+/** Per-category header counts over the lines currently shown (archived lines count only towards the total). */
+export function categorySummary(items: MaterialItem[], today: string) {
+  const live = items.filter((m) => !m.archived_at);
+  return {
+    total: items.length,
+    overdue: live.filter((m) => isOverdueLine(m, today)).length,
+    noDate: live.filter((m) => !hasAnyMaterialDate(m)).length,
+    awaiting: live.filter((m) => AWAITING_CONFIRMATION_STATUSES.has(m.status)).length,
+  };
+}
