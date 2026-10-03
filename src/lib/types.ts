@@ -14,7 +14,8 @@ export interface Project {
 
 export interface BudgetCategory { id: string; name: string; kind: 'finishing' | 'fixed' | 'other'; include_in_misc_basis: boolean; sort_order: number; source_label: string; notes: string; archived_at: string | null; usage_count?: number; active_count?: number }
 export interface MaterialCategory { id: string; name: string; sort_order: number; archived_at: string | null; usage_count?: number; active_count?: number }
-export interface CategoriesResponse { budget: BudgetCategory[]; material: MaterialCategory[] }
+export interface ContractCategory { id: string; name: string; sort_order: number; archived_at: string | null; usage_count?: number; active_count?: number }
+export interface CategoriesResponse { budget: BudgetCategory[]; material: MaterialCategory[]; contract?: ContractCategory[] }
 export interface BudgetItem {
   id: string; category_id: string; name: string; description: string; quantity: number | null; unit: string;
   source_label: string;
@@ -32,6 +33,7 @@ export interface PaymentTransaction { id: string; milestone_id: string; amount: 
 export interface MilestoneBalance { scheduled: number; paid: number; pending: number; overpaid: number; isOverdue: boolean; derivedStatus: string }
 export interface PaymentMilestone {
   id: string; payee_type: string; payee_name: string; cost_category: string; budget_item_id: string | null; budget_item_name: string | null;
+  contract_id: string | null; contract_title: string | null;
   po_contract_ref: string; invoice_ref: string; description: string; due_date: string | null; scheduled_amount: number;
   status: 'active' | 'on_hold' | 'cancelled'; notes: string; archived_at: string | null; attachment_count: number;
   transactions: PaymentTransaction[]; balance: MilestoneBalance;
@@ -75,6 +77,25 @@ export interface WorkUpdate { id: string; update_date: string; title: string; de
 
 export interface AuditEntry { id: number; action: string; entity_type: string; entity_id: string | null; summary: string; before: any; after: any; user_email: string | null; created_at: string }
 
-export type Section = 'portfolio' | 'dashboard' | 'budget' | 'payments' | 'materials' | 'consultant' | 'site' | 'timeline' | 'audit' | 'users' | 'notifications';
+export interface ContractPaymentSummary { milestoneCount: number; scheduled: number; paid: number; pending: number; overdueCount: number }
+export interface Contract {
+  id: string; title: string; category_id: string; category_name: string; category_sort: number; company_name: string; reference: string;
+  signed_date: string | null; status: string; notes: string; drive_url: string; archived_at: string | null;
+  created_at: string; updated_at: string; created_by_name: string | null; attachment_count: number; amendment_count: number;
+  /** present only for users with financial access (payments.read) */
+  contract_value?: number | null;
+  payments?: ContractPaymentSummary;
+  /** present only for users with budget access */
+  budget_item_id?: string | null; budget_item_name?: string | null;
+}
+export interface ContractAmendment { id: string; contract_id: string; amendment_date: string; description: string; reference: string; notes: string; archived_at: string | null; created_by_name: string | null; created_at: string; attachment_count: number }
+export interface LinkedMilestone { id: string; payee_name: string; description: string; due_date: string | null; status: string; scheduled_amount: number; archived_at: string | null; balance: MilestoneBalance }
+export interface ContractDetail extends Omit<Contract, 'payments'> {
+  amendments: ContractAmendment[];
+  payments?: { summary: ContractPaymentSummary; milestones: LinkedMilestone[] };
+}
+export interface ContractsResponse { contracts: Contract[]; access: { finance: boolean; budget: boolean } }
+
+export type Section = 'portfolio' | 'dashboard' | 'budget' | 'payments' | 'contracts' | 'materials' | 'consultant' | 'site' | 'timeline' | 'audit' | 'users' | 'notifications';
 export interface FocusProps { focusId?: string | null; onFocusHandled?: () => void }
 export interface AppNotification { id: string; project_id: string; project_code: string; kind: string; event_type: string; title: string; body: string; url: string; read_at: string | null; created_at: string }

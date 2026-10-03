@@ -2,21 +2,23 @@ import React, { useState } from 'react';
 import { Archive, ArrowDown, ArrowUp, Check, Pencil, Plus, RotateCcw, Trash2, X } from 'lucide-react';
 import { api, patch, post } from '../lib/api';
 import { useApi } from '../lib/hooks';
-import type { BudgetCategory, CategoriesResponse, MaterialCategory } from '../lib/types';
+import type { BudgetCategory, CategoriesResponse, ContractCategory, MaterialCategory } from '../lib/types';
 import { Badge, Button, EmptyState, inputCls, Notice, Spinner, Tabs, useUi } from './ui';
 
-type Kind = 'budget' | 'material';
-type Row = (BudgetCategory | MaterialCategory) & { usage_count?: number; active_count?: number };
+type Kind = 'budget' | 'material' | 'contract';
+type Row = (BudgetCategory | MaterialCategory | ContractCategory) & { usage_count?: number; active_count?: number };
+const TAB_LABEL: Record<Kind, string> = { budget: 'Budget categories', material: 'Material categories', contract: 'Contract categories' };
 
 const KIND_LABEL: Record<string, string> = { finishing: 'Finishing', fixed: 'Fixed cost', other: 'Other' };
 
 /**
  * Admin-only, project-scoped category management: add, rename, reorder, archive / restore and
  * delete (only when unused). Budget categories group budget items; material categories group
- * material supply lines. Records are never changed except for following a rename.
+ * material supply lines; contract categories group the contract register. Records are never
+ * changed except for following a rename. `kinds` chooses which lists are offered as tabs.
  */
-export function ManageCategories({ projectId, initialTab = 'budget', onChanged, readOnly }: {
-  projectId: string; initialTab?: Kind; onChanged?: () => void; readOnly?: boolean;
+export function ManageCategories({ projectId, initialTab = 'budget', onChanged, readOnly, kinds = ['budget', 'material'] }: {
+  projectId: string; initialTab?: Kind; onChanged?: () => void; readOnly?: boolean; kinds?: Kind[];
 }) {
   const base = `/api/projects/${projectId}/categories`;
   const { data, error, reload } = useApi<CategoriesResponse>(base);
@@ -31,7 +33,8 @@ export function ManageCategories({ projectId, initialTab = 'budget', onChanged, 
 
   if (error) return <Notice tone="rose">{error}</Notice>;
   if (!data) return <Spinner />;
-  const all: Row[] = tab === 'budget' ? data.budget : data.material;
+  const lists: Record<Kind, Row[]> = { budget: data.budget, material: data.material, contract: data.contract ?? [] };
+  const all: Row[] = lists[tab];
   const rows = all.filter((c) => showArchived || !c.archived_at);
   const archivedCount = all.filter((c) => c.archived_at).length;
 
@@ -70,7 +73,9 @@ export function ManageCategories({ projectId, initialTab = 'budget', onChanged, 
     const n = c.active_count ?? 0;
     const msg = tab === 'budget'
       ? <>Archive <b>{c.name}</b>? It disappears from the category dropdown and its {n} active item(s) are hidden from budget totals. Nothing is deleted and you can restore it.</>
-      : <>Archive <b>{c.name}</b>? It disappears from the category dropdown for new material lines. Its {n} existing line(s) stay unchanged. You can restore it.</>;
+      : tab === 'contract'
+        ? <>Archive <b>{c.name}</b>? It disappears from the category dropdown for new contracts. Its {n} existing contract(s) stay unchanged. You can restore it.</>
+        : <>Archive <b>{c.name}</b>? It disappears from the category dropdown for new material lines. Its {n} existing line(s) stay unchanged. You can restore it.</>;
     if (await confirm(msg, { title: 'Archive category', confirmLabel: 'Archive', danger: true })) {
       await run(() => post(`${base}/${tab}/${c.id}/archive`), `Archived “${c.name}”`);
     }
@@ -83,10 +88,9 @@ export function ManageCategories({ projectId, initialTab = 'budget', onChanged, 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Tabs value={tab} onChange={(t) => { setTab(t); setEditing(null); }} tabs={[
-          { id: 'budget', label: 'Budget categories', count: data.budget.filter((c) => !c.archived_at).length },
-          { id: 'material', label: 'Material categories', count: data.material.filter((c) => !c.archived_at).length },
-        ]} />
+        {kinds.length > 1
+          ? <Tabs value={tab} onChange={(t) => { setTab(t); setEditing(null); }} tabs={kinds.map((k) => ({ id: k, label: TAB_LABEL[k], count: lists[k].filter((c) => !c.archived_at).length }))} />
+          : <span className="text-sm font-semibold text-slate-800">{TAB_LABEL[tab]}</span>}
         {archivedCount > 0 && (
           <label className="flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />Show archived ({archivedCount})</label>
         )}
@@ -94,7 +98,9 @@ export function ManageCategories({ projectId, initialTab = 'budget', onChanged, 
       <p className="text-xs text-slate-500">
         {tab === 'budget'
           ? 'Budget categories group the Master Items & Budget lines and appear in the budget item form. The order here is the order used everywhere.'
-          : 'Material categories group the material supply lines and appear as the category dropdown in the material line form.'}
+          : tab === 'contract'
+            ? 'Contract categories group the Contracts & Documents register and appear as the category dropdown in the contract form.'
+            : 'Material categories group the material supply lines and appear as the category dropdown in the material line form.'}
         {' '}Categories belong to this project only. A category used by any record cannot be deleted — archive it instead.
       </p>
 

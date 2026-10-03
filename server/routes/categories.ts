@@ -2,7 +2,9 @@
 //   /api/projects/:projectId/categories            GET  both lists (+ usage counts)
 //   /api/projects/:projectId/categories/budget      POST / PATCH :id / POST reorder / archive / restore / DELETE :id
 //   /api/projects/:projectId/categories/material    same
-// Budget categories group budget items; material categories group material supply lines.
+//   /api/projects/:projectId/categories/contract    same
+// Budget categories group budget items; material categories group material supply lines;
+// contract categories group the Contracts & Documents register.
 // A category that is used by any record (including archived ones) cannot be deleted — archive it instead.
 import { Router, type Request } from 'express';
 import { z } from 'zod';
@@ -14,12 +16,12 @@ import { audit, diff } from '../audit';
 import { getOwned, insertRow, patchOwned } from '../lib/crud';
 import { can } from '../permissions';
 
-type Kind = 'budget' | 'material';
-const TABLE: Record<Kind, string> = { budget: 'budget_categories', material: 'material_categories' };
+type Kind = 'budget' | 'material' | 'contract';
+const TABLE: Record<Kind, string> = { budget: 'budget_categories', material: 'material_categories', contract: 'contract_categories' };
 const zName = zText(160).min(1, 'Name is required');
 
 export async function loadCategories(db: pg.Pool | pg.PoolClient, projectId: string) {
-  const [budget, material] = await Promise.all([
+  const [budget, material, contract] = await Promise.all([
     db.query(
       `SELECT c.*,
               (SELECT count(*)::int FROM budget_items i WHERE i.category_id = c.id) AS usage_count,
@@ -35,8 +37,15 @@ export async function loadCategories(db: pg.Pool | pg.PoolClient, projectId: str
          FROM material_categories c WHERE c.project_id = $1 ORDER BY c.sort_order, c.created_at`,
       [projectId],
     ),
+    db.query(
+      `SELECT c.*,
+              (SELECT count(*)::int FROM contracts k WHERE k.category_id = c.id) AS usage_count,
+              (SELECT count(*)::int FROM contracts k WHERE k.category_id = c.id AND k.archived_at IS NULL) AS active_count
+         FROM contract_categories c WHERE c.project_id = $1 ORDER BY c.sort_order, c.created_at`,
+      [projectId],
+    ),
   ]);
-  return { budget: budget.rows, material: material.rows };
+  return { budget: budget.rows, material: material.rows, contract: contract.rows };
 }
 
 async function assertUniqueName(c: pg.PoolClient, kind: Kind, projectId: string, name: string, exceptId?: string) {
@@ -51,6 +60,10 @@ async function usage(c: pg.PoolClient, kind: Kind, id: string) {
   if (kind === 'budget') {
     const { rows } = await c.query('SELECT count(*)::int AS n FROM budget_items WHERE category_id = $1', [id]);
     return { total: rows[0].n as number, detail: `${rows[0].n} budget item(s)` };
+  }
+  if (kind === 'contract') {
+    const { rows } = await c.query('SELECT count(*)::int AS n FROM contracts WHERE category_id = $1', [id]);
+    return { total: rows[0].n as number, detail: `${rows[0].n} contract(s)` };
   }
   const { rows } = await c.query(
     `SELECT (SELECT count(*)::int FROM material_items WHERE category_id = $1) AS lines,
@@ -76,12 +89,16 @@ export function categoryRoutes(pool: pg.Pool) {
 
   r.get('/', async (req, res) => {
     const u = req.user!;
-    if (!can(u.role, 'budget.read') && !can(u.role, 'materials.read')) throw forbidden();
+    if (!can(u.role, 'budget.read') && !can(u.role, 'materials.read') && !can(u.role, 'contracts.read')) throw forbidden();
     const all = await loadCategories(pool, req.project!.id);
-    res.json({ budget: can(u.role, 'budget.read') ? all.budget : [], material: can(u.role, 'materials.read') ? all.material : [] });
+    res.json({
+      budget: can(u.role, 'budget.read') ? all.budget : [],
+      material: can(u.role, 'materials.read') ? all.material : [],
+      contract: can(u.role, 'contracts.read') ? all.contract : [],
+    });
   });
 
-  for (const kind of ['budget', 'material'] as const) {
+  for (const kind of ['budget', 'material', 'contract'] as const) {
     const table = TABLE[kind];
     const entity = `${kind}_category`;
     const guard = (req: Request) => assertCap(req, 'categories.manage');

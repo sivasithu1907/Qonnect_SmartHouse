@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { PAGE_CONTAINER } from '../lib/layout';
 import {
-  Building2, CalendarDays, Check, ChevronDown, Coins, CreditCard, ExternalLink, FolderOpen, FolderPlus, FolderX, History, Layers, LayoutDashboard, LogOut,
+  Building2, CalendarDays, Check, ChevronDown, Coins, CreditCard, ExternalLink, FileSignature, FolderOpen, FolderPlus, FolderX, History, Layers, LayoutDashboard, LogOut,
   MapPin, Menu, Plus, Settings, Truck, UserCheck, Users, X, KeyRound, Bell, Download,
 } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
@@ -59,6 +59,7 @@ export function Header({ section, onNavigate, projects, current, onSelectProject
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, show: true },
     { id: 'budget', label: 'Master Items & Budget', icon: Coins, show: can('budget.read') },
     { id: 'payments', label: 'Payments', icon: CreditCard, show: can('payments.read') },
+    { id: 'contracts', label: 'Contracts & Documents', icon: FileSignature, show: can('contracts.read') },
     { id: 'materials', label: 'Material Supply', icon: Truck, show: can('materials.read') },
     { id: 'consultant', label: 'Consultant Visits', icon: UserCheck, show: can('consultant.read') },
     { id: 'site', label: 'Site Visits', icon: MapPin, show: can('site.read') },

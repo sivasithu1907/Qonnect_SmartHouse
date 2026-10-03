@@ -1,4 +1,4 @@
-// Private file uploads (payment slips, consultant reports, delivery notes, site photos).
+// Private file uploads (payment slips, consultant reports, delivery notes, site photos, contract documents).
 // Files are stored outside the web root under UPLOAD_DIR/<projectId>/ with random names,
 // content type is detected from magic bytes (client-supplied type is ignored), and
 // downloads re-check project membership and role on every request.
@@ -15,7 +15,7 @@ import { withTx } from '../db';
 import { audit } from '../audit';
 import { getOwned } from '../lib/crud';
 import { can, type Capability } from '../permissions';
-import { ATTACHMENT_ENTITY_TYPES, ATTACHMENT_KINDS, type AttachmentEntityType } from '../../shared/constants';
+import { ATTACHMENT_ENTITY_TYPES, ATTACHMENT_KINDS, attachmentKindsFor, type AttachmentEntityType } from '../../shared/constants';
 import { canWriteConsultantVisit, canWriteSiteVisit } from './visits';
 
 interface Detected { mime: string; ext: string }
@@ -45,6 +45,8 @@ const READ_CAP: Record<AttachmentEntityType, Capability> = {
   consultant_visit: 'consultant.read',
   site_visit: 'site.read',
   work_update: 'timeline.read',
+  contract: 'contracts.read',
+  contract_amendment: 'contracts.read',
 };
 const TABLE: Record<AttachmentEntityType, string> = {
   payment_milestone: 'payment_milestones',
@@ -53,6 +55,8 @@ const TABLE: Record<AttachmentEntityType, string> = {
   consultant_visit: 'consultant_visits',
   site_visit: 'site_visits',
   work_update: 'work_updates',
+  contract: 'contracts',
+  contract_amendment: 'contract_amendments',
 };
 
 async function assertEntityAccess(db: pg.Pool | pg.PoolClient, req: Request, type: AttachmentEntityType, entityId: string, mode: 'read' | 'write') {
@@ -80,6 +84,10 @@ async function assertEntityAccess(db: pg.Pool | pg.PoolClient, req: Request, typ
       break;
     case 'work_update':
       ok = can(u.role, 'timeline.write') || (can(u.role, 'workupdates.write') && row.author_id === u.id);
+      break;
+    case 'contract':
+    case 'contract_amendment':
+      ok = can(u.role, 'contracts.write');
       break;
   }
   if (!ok) throw forbidden();
@@ -125,6 +133,7 @@ export function attachmentRoutes(pool: pg.Pool, cfg: AppConfig) {
     const originalName = path.basename(file.originalname).replace(/[\u0000-\u001f"\\]/g, '_').slice(0, 200) || 'file';
     const detected = detectFileType(file.buffer, originalName);
     if (!detected) throw new HttpError(415, 'Unsupported file type. Allowed: PDF, JPG, PNG, WEBP, HEIC, DOCX, XLSX.');
+    if (!attachmentKindsFor(body.entity_type).includes(body.kind)) throw badRequest('This document type cannot be attached to this record');
     if (body.kind === 'site_photo' && !detected.mime.startsWith('image/')) throw badRequest('Site photos must be image files');
     await assertEntityAccess(pool, req, body.entity_type, body.entity_id, 'write');
 
@@ -175,6 +184,10 @@ export function attachmentRoutes(pool: pg.Pool, cfg: AppConfig) {
     const out = await withTx(pool, async (c) => {
       const a = await getOwned<Record<string, string>>(c, 'attachments', pid, id, { forUpdate: true });
       await assertEntityAccess(c, req, a.entity_type as AttachmentEntityType, a.entity_id, 'write');
+      // the original signed agreement is kept: only an admin can archive a signed-contract file
+      if (a.kind === 'signed_contract' && !can(req.user!.role, 'projects.manage')) {
+        throw forbidden('Signed contract files are kept as the original agreement. Only an admin can archive them — record changes as an amendment instead.');
+      }
       await c.query('UPDATE attachments SET archived_at = now() WHERE id = $1', [id]);
       await audit(c, req, { projectId: pid, action: 'archive', entityType: 'attachment', entityId: id, summary: `Archived file ${a.original_name}` });
       return { ok: true };

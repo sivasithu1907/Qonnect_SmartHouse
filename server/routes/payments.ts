@@ -12,8 +12,9 @@ import { milestoneBalance, sumMoney, todayISO, toCents } from '../../shared/calc
 export async function loadPayments(db: pg.Pool | pg.PoolClient, projectId: string, timeZone: string, includeArchived = false) {
   const [ms, txs, att] = await Promise.all([
     db.query(
-      `SELECT m.*, bi.name AS budget_item_name FROM payment_milestones m
+      `SELECT m.*, bi.name AS budget_item_name, ct.title AS contract_title FROM payment_milestones m
          LEFT JOIN budget_items bi ON bi.id = m.budget_item_id AND bi.project_id = m.project_id
+         LEFT JOIN contracts ct ON ct.id = m.contract_id AND ct.project_id = m.project_id
         WHERE m.project_id = $1 AND ($2 OR m.archived_at IS NULL)
         ORDER BY m.due_date NULLS LAST, m.created_at`,
       [projectId, includeArchived],
@@ -63,6 +64,7 @@ const milestoneSchema = z.object({
   payee_name: zText(200).min(1),
   cost_category: zText(160).default(''),
   budget_item_id: z.preprocess((v) => (v === '' ? null : v), z.string().uuid().nullable()).optional(),
+  contract_id: z.preprocess((v) => (v === '' ? null : v), z.string().uuid().nullable()).optional(),
   po_contract_ref: zText(120).default(''),
   invoice_ref: zText(120).default(''),
   description: zText(500).min(1),
@@ -80,6 +82,14 @@ const txSchema = z.object({
   notes: zText(4000).default(''),
   allow_overpayment: z.boolean().optional(),
 });
+
+/** A milestone may reference a contract only from the same project, and not an archived one. */
+async function assertLinkableContract(c: pg.PoolClient, projectId: string, contractId: string | null | undefined) {
+  if (!contractId) return;
+  await assertSameProject(c, 'contracts', projectId, contractId, 'Contract');
+  const { rows } = await c.query('SELECT archived_at FROM contracts WHERE id = $1', [contractId]);
+  if (rows[0]?.archived_at) throw badRequest('That contract is archived. Restore it before linking payments to it.');
+}
 
 function isUniqueViolation(e: unknown) {
   return (e as { code?: string })?.code === '23505';
@@ -121,7 +131,8 @@ export function paymentRoutes(pool: pg.Pool, timeZone: string) {
     const pid = req.project!.id;
     const row = await withTx(pool, async (c) => {
       await assertSameProject(c, 'budget_items', pid, body.budget_item_id, 'Budget item');
-      const m = await insertRow(c, 'payment_milestones', { ...body, budget_item_id: body.budget_item_id ?? null, project_id: pid, created_by: req.user!.id });
+      await assertLinkableContract(c, pid, body.contract_id);
+      const m = await insertRow(c, 'payment_milestones', { ...body, budget_item_id: body.budget_item_id ?? null, contract_id: body.contract_id ?? null, project_id: pid, created_by: req.user!.id });
       await audit(c, req, { projectId: pid, action: 'create', entityType: 'payment_milestone', entityId: m.id as string, summary: `Scheduled payment "${body.description}" to ${body.payee_name}: QAR ${body.scheduled_amount}`, after: m });
       return m;
     });
@@ -135,6 +146,10 @@ export function paymentRoutes(pool: pg.Pool, timeZone: string) {
     const pid = req.project!.id;
     const out = await withTx(pool, async (c) => {
       if (body.budget_item_id) await assertSameProject(c, 'budget_items', pid, body.budget_item_id, 'Budget item');
+      if (body.contract_id) {
+        const cur = await getOwned<Record<string, unknown>>(c, 'payment_milestones', pid, id);
+        if (cur.contract_id !== body.contract_id) await assertLinkableContract(c, pid, body.contract_id);
+      }
       const { before, after } = await patchOwned(c, 'payment_milestones', pid, id, body);
       const d = diff(before, after);
       await audit(c, req, { projectId: pid, action: 'update', entityType: 'payment_milestone', entityId: id, summary: `Edited payment milestone "${after.description}" (${d.changed.join(', ')})`, before: d.before, after: d.after });

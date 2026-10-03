@@ -3,7 +3,7 @@ import { Archive, ChevronDown, ChevronRight, CreditCard, Download, FolderOpen, P
 import { ApiError, patch, post } from '../lib/api';
 import { useApi, useFocusRecord } from '../lib/hooks';
 import { useSession } from '../lib/session';
-import type { FocusProps, BudgetResponse, PaymentMilestone, PaymentsResponse, PaymentTransaction, Project } from '../lib/types';
+import type { FocusProps, BudgetResponse, ContractsResponse, PaymentMilestone, PaymentsResponse, PaymentTransaction, Project } from '../lib/types';
 import { formatDate, formatQAR, todayLocalISO } from '../lib/format';
 import { PAYEE_TYPE_LABELS, PAYEE_TYPES, PAYMENT_METHOD_LABELS, PAYMENT_METHODS } from '../../shared/constants';
 import { Attachments } from '../components/Attachments';
@@ -25,10 +25,11 @@ export function Payments({ project, focusId, onFocusHandled }: { project: Projec
   const [payee, setPayee] = useState('');
   const [status, setStatus] = useState('');
   const writable = can('payments.write') && !project.archived_at;
+  const { data: contracts } = useApi<ContractsResponse>(writable && can('contracts.read') ? `/api/projects/${project.id}/contracts` : null);
 
   const rows = useMemo(() => (data?.milestones ?? []).filter((m) => {
     const s = q.toLowerCase();
-    const txt = [m.payee_name, m.description, m.po_contract_ref, m.invoice_ref, m.cost_category, ...m.transactions.map((t) => t.reference)].join(' ').toLowerCase();
+    const txt = [m.payee_name, m.description, m.po_contract_ref, m.invoice_ref, m.cost_category, m.contract_title ?? '', ...m.transactions.map((t) => t.reference)].join(' ').toLowerCase();
     return (!s || txt.includes(s)) && (!payee || m.payee_type === payee) && (!status || m.balance.derivedStatus === status);
   }), [data, q, payee, status]);
 
@@ -39,11 +40,14 @@ export function Payments({ project, focusId, onFocusHandled }: { project: Projec
     value: i.id, label: `${budget!.categories.find((c) => c.id === i.category_id)?.name ?? ''} · ${i.name}`,
   }));
 
+  const contractOptions = (contracts?.contracts ?? []).map((k) => ({ value: k.id, label: `${k.title} — ${k.company_name}`, group: k.category_name }));
+
   const milestoneFields: FieldSpec[] = [
     { name: 'payee_type', label: 'Payee type', type: 'select', options: PAYEE_TYPES.map((p) => ({ value: p, label: PAYEE_TYPE_LABELS[p] })), required: true },
     { name: 'payee_name', label: 'Payee name', required: true },
     { name: 'cost_category', label: 'Cost category' },
     { name: 'budget_item_id', label: 'Related master budget item', type: 'select', nullable: true, options: budgetOptions },
+    { name: 'contract_id', label: 'Contract', type: 'searchselect', nullable: true, options: contractOptions, hidden: !contracts, help: 'Optional. Contracts from this project only. Linking does not change any amount.' },
     { name: 'po_contract_ref', label: 'PO / contract reference' },
     { name: 'invoice_ref', label: 'Invoice reference' },
     { name: 'description', label: 'Milestone / description', required: true, wide: true },
@@ -124,7 +128,7 @@ export function Payments({ project, focusId, onFocusHandled }: { project: Projec
                   <tr id={`rec-${m.id}`} className={`${m.archived_at ? 'opacity-60' : ''} hover:bg-slate-50/60`}>
                     <Td><button onClick={() => setOpen((o) => ({ ...o, [m.id]: !o[m.id] }))} className="p-0.5 text-slate-500" aria-label="Toggle transfers">{open[m.id] ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}</button></Td>
                     <Td><div className="font-semibold text-slate-900">{m.payee_name}</div><div className="text-[11px] text-slate-500">{PAYEE_TYPE_LABELS[m.payee_type as keyof typeof PAYEE_TYPE_LABELS]}{m.cost_category ? ` · ${m.cost_category}` : ''}</div></Td>
-                    <Td><div>{m.description}</div>{m.budget_item_name && <div className="text-[11px] text-slate-500">Budget: {m.budget_item_name}</div>}</Td>
+                    <Td><div>{m.description}</div>{m.budget_item_name && <div className="text-[11px] text-slate-500">Budget: {m.budget_item_name}</div>}{m.contract_title && <div className="text-[11px] text-slate-500">Contract: {can('contracts.read') ? <a href={`#/contracts/${project.id}/${m.contract_id}`} className="text-sky-700">{m.contract_title}</a> : m.contract_title}</div>}</Td>
                     <Td className="text-[11px]">{m.po_contract_ref && <div>PO/Contract: {m.po_contract_ref}</div>}{m.invoice_ref && <div>Invoice: {m.invoice_ref}</div>}</Td>
                     <Td className="whitespace-nowrap">{formatDate(m.due_date)}</Td>
                     <Td className="text-right font-mono">{formatQAR(m.scheduled_amount)}</Td>

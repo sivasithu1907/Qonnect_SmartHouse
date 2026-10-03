@@ -2,6 +2,7 @@ import type pg from 'pg';
 import { FIXED_COST_ITEMS, FINISHING_CATEGORIES, TIMELINE_TEMPLATE } from './templates';
 import { MATERIALS, PROJECTS, SOURCE_MATERIAL_TRACKER } from './sourceData';
 import { audit } from '../audit';
+import { DEFAULT_CONTRACT_CATEGORIES } from '../../shared/constants';
 import { withTx } from '../db';
 
 type C = pg.PoolClient;
@@ -96,6 +97,15 @@ export async function applySourceData(c: C, projectId: string) {
   }
 }
 
+/** Default contract categories for a new project (names only — no contracts are created). */
+export async function applyContractCategories(c: C, projectId: string) {
+  const { rowCount } = await c.query('SELECT 1 FROM contract_categories WHERE project_id = $1 LIMIT 1', [projectId]);
+  if (rowCount) return;
+  for (const [i, name] of DEFAULT_CONTRACT_CATEGORIES.entries()) {
+    await c.query('INSERT INTO contract_categories (project_id, name, sort_order) VALUES ($1,$2,$3)', [projectId, name, i + 1]);
+  }
+}
+
 /** Idempotent seed: creates the two supplied projects if their codes don't exist yet. */
 export async function seedProjects(pool: pg.Pool, log: (m: string) => void = console.log) {
   for (const p of PROJECTS) {
@@ -113,6 +123,7 @@ export async function seedProjects(pool: pg.Pool, log: (m: string) => void = con
       if (p.seedSource) await applySourceData(c, id);
       else await applyBudgetStructure(c, id);
       await applyTimelineTemplate(c, id);
+      await applyContractCategories(c, id);
       await audit(c, null, {
         projectId: id, action: 'seed', entityType: 'project', entityId: id,
         summary: p.seedSource ? 'Seeded budget categories (no amounts) and source material supply lines' : 'Created clean workspace with standard structure',

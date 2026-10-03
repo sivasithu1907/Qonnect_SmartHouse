@@ -36,6 +36,9 @@ beforeAll(async () => {
     ($1,'Tiles, Ceramic & Marble','Ceramic tiles',0), ($1,'Tiles, Ceramic & Marble','Marble',1),
     ($1,'Windows & Doors','Windows',2), ($1,' windows & doors ','Doors',3), ($1,'Painting Works','Primer',4)`, [pid]);
   await q(`INSERT INTO material_scope_notes (project_id, category, owner_supply) VALUES ($1,'Tiles, Ceramic & Marble','Owner supplies tiles'), ($1,'Landscape Works','Owner supplies plants')`, [pid]);
+  const ms = (await q(`INSERT INTO payment_milestones (project_id, payee_type, payee_name, description, scheduled_amount) VALUES ($1,'contractor','Builder','Advance',1000) RETURNING id`, [pid]))[0].id;
+  await q(`INSERT INTO attachments (project_id, entity_type, entity_id, kind, original_name, stored_name, mime_type, size_bytes, sha256)
+    VALUES ($1,'payment_milestone',$2,'payment_slip','slip.pdf','stored-1.pdf','application/pdf',10,'x')`, [pid, ms]);
 
   await runMigrations(pool, path.resolve('migrations'), () => undefined);
 });
@@ -88,9 +91,27 @@ describe('migration 002 on existing data', () => {
     expect(col).toEqual([{ is_nullable: 'YES' }]);
   });
 
+  it('004 adds default contract categories only — no contracts — and keeps payments and files unchanged', async () => {
+    expect((await q('SELECT name FROM contract_categories WHERE project_id = $1 ORDER BY sort_order', [pid])).map((r) => r.name))
+      .toEqual(['Main Contractor', 'Finishing Works', 'Consultant', 'Other']);
+    expect((await q('SELECT count(*)::int n FROM contracts'))[0].n).toBe(0);
+    expect((await q('SELECT count(*)::int n FROM contract_amendments'))[0].n).toBe(0);
+    expect(await q('SELECT payee_name, scheduled_amount, contract_id FROM payment_milestones')).toEqual([{ payee_name: 'Builder', scheduled_amount: 1000, contract_id: null }]);
+    expect(await q('SELECT entity_type, kind, original_name FROM attachments')).toEqual([{ entity_type: 'payment_milestone', kind: 'payment_slip', original_name: 'slip.pdf' }]);
+    // widened checks accept contract documents and still reject unknown values
+    const k = (await q(`INSERT INTO contracts (project_id, title, category_id, company_name) SELECT $1, 'T', id, 'C' FROM contract_categories WHERE project_id = $1 LIMIT 1 RETURNING id`, [pid]))[0].id;
+    await q(`INSERT INTO attachments (project_id, entity_type, entity_id, kind, original_name, stored_name, mime_type, size_bytes, sha256)
+      VALUES ($1,'contract',$2,'signed_contract','c.pdf','stored-2.pdf','application/pdf',10,'y')`, [pid, k]);
+    await expect(pool.query(`INSERT INTO attachments (project_id, entity_type, entity_id, kind, original_name, stored_name, mime_type, size_bytes, sha256)
+      VALUES ($1,'contract',$2,'malware','c.exe','stored-3','application/x',10,'z')`, [pid, k])).rejects.toThrow();
+    await expect(pool.query(`UPDATE contracts SET status = 'Pending' WHERE id = $1`, [k])).rejects.toThrow();
+    await q('DELETE FROM attachments WHERE entity_id = $1', [k]);
+    await q('DELETE FROM contracts WHERE id = $1', [k]);
+  });
+
   it('is recorded once and not re-applied', async () => {
     expect((await q('SELECT filename FROM schema_migrations ORDER BY 1')).map((r) => r.filename)).toEqual([
-      '001_init.sql', '002_finalized_budget_and_categories.sql', '003_notifications_push.sql',
+      '001_init.sql', '002_finalized_budget_and_categories.sql', '003_notifications_push.sql', '004_contracts.sql',
     ]);
     expect(await runMigrations(pool, path.resolve('migrations'), () => undefined)).toEqual([]);
   });

@@ -5,7 +5,7 @@ import { assertCap, requireCap } from '../auth';
 import { badRequest, conflict, parseBody, zDate, zMoney, zText, zUrl } from '../lib/http';
 import { withTx } from '../db';
 import { audit, diff } from '../audit';
-import { applyBudgetStructure, applyTimelineTemplate } from '../seed/apply';
+import { applyBudgetStructure, applyContractCategories, applyTimelineTemplate } from '../seed/apply';
 import { MISC_BASES } from '../../shared/constants';
 
 export const normalizeCode = (code: string) => code.trim().replace(/\s+/g, ' ');
@@ -82,6 +82,7 @@ export function projectCollectionRoutes(pool: pg.Pool) {
       const p = rows[0];
       if (body.template.budget) await applyBudgetStructure(c, p.id);
       if (body.template.timeline) await applyTimelineTemplate(c, p.id);
+      await applyContractCategories(c, p.id);
       await audit(c, req, { projectId: p.id, action: 'create', entityType: 'project', entityId: p.id, summary: `Created project ${p.name} — ${p.code}`, after: p });
       return p;
     });

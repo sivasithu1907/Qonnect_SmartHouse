@@ -18,13 +18,14 @@ import { ConsultantVisits } from './pages/ConsultantVisits';
 import { SiteVisits } from './pages/SiteVisits';
 import { Timeline } from './pages/Timeline';
 import { AuditLog } from './pages/AuditLog';
+import { Contracts } from './pages/Contracts';
 import { UsersAdmin } from './pages/UsersAdmin';
 import { NotificationSettings } from './pages/NotificationSettings';
 import { UpdateBanner } from './components/UpdateBanner';
 import { InstallAppDialog } from './components/InstallApp';
 import { detachDeviceOnLogout, syncSubscription } from './lib/push';
 
-const SECTIONS: Section[] = ['portfolio', 'dashboard', 'budget', 'payments', 'materials', 'consultant', 'site', 'timeline', 'audit', 'users', 'notifications'];
+const SECTIONS: Section[] = ['portfolio', 'dashboard', 'budget', 'payments', 'contracts', 'materials', 'consultant', 'site', 'timeline', 'audit', 'users', 'notifications'];
 const UUID = /^[0-9a-f-]{36}$/i;
 const FOCUS_FILTER = /^filter:[a-z-]{1,40}$/; // e.g. #/materials/<project>/filter:no-date
 
@@ -171,6 +172,7 @@ function Shell() {
             {section === 'dashboard' && <Dashboard project={current} onNavigate={setSection} onSettings={() => setSettingsOpen(true)} />}
             {section === 'budget' && <Budget project={current} onSettings={() => setSettingsOpen(true)} />}
             {section === 'payments' && <Payments project={current} {...focusProps} />}
+            {section === 'contracts' && <Contracts project={current} {...focusProps} />}
             {section === 'materials' && <Materials project={current} {...focusProps} />}
             {section === 'consultant' && <ConsultantVisits project={current} {...focusProps} />}
             {section === 'site' && <SiteVisits project={current} {...focusProps} />}

@@ -69,17 +69,40 @@ export const ATTACHMENT_ENTITY_TYPES = [
   'consultant_visit',
   'site_visit',
   'work_update',
+  'contract',
+  'contract_amendment',
 ] as const;
 export type AttachmentEntityType = (typeof ATTACHMENT_ENTITY_TYPES)[number];
 
-export const ATTACHMENT_KINDS = ['payment_slip', 'consultant_report', 'delivery_note', 'site_photo', 'supporting_document'] as const;
-export const ATTACHMENT_KIND_LABELS: Record<(typeof ATTACHMENT_KINDS)[number], string> = {
+export const ATTACHMENT_KINDS = [
+  'payment_slip', 'consultant_report', 'delivery_note', 'site_photo', 'supporting_document',
+  'signed_contract', 'quotation', 'boq', 'amendment',
+] as const;
+export type AttachmentKind = (typeof ATTACHMENT_KINDS)[number];
+export const ATTACHMENT_KIND_LABELS: Record<AttachmentKind, string> = {
   payment_slip: 'Payment slip / receipt',
   consultant_report: 'Consultant report',
   delivery_note: 'Delivery note',
   site_photo: 'Site photo',
   supporting_document: 'Supporting document',
+  signed_contract: 'Signed contract',
+  quotation: 'Quotation',
+  boq: 'BOQ',
+  amendment: 'Amendment',
 };
+/** Document types offered for contract files; the other record types keep their original list. */
+export const CONTRACT_DOCUMENT_KINDS = ['signed_contract', 'quotation', 'boq', 'amendment', 'supporting_document'] as const satisfies readonly AttachmentKind[];
+export const GENERAL_ATTACHMENT_KINDS = ['payment_slip', 'consultant_report', 'delivery_note', 'site_photo', 'supporting_document'] as const satisfies readonly AttachmentKind[];
+/** Which document types each record type accepts (checked on the server). */
+export function attachmentKindsFor(entityType: AttachmentEntityType): readonly AttachmentKind[] {
+  return entityType === 'contract' || entityType === 'contract_amendment' ? CONTRACT_DOCUMENT_KINDS : GENERAL_ATTACHMENT_KINDS;
+}
+
+// Contracts & Documents
+export const CONTRACT_STATUSES = ['Draft', 'Signed', 'Active', 'Completed', 'Terminated'] as const;
+export type ContractStatus = (typeof CONTRACT_STATUSES)[number];
+/** Created for every new project; admins can rename, reorder, archive or add categories. */
+export const DEFAULT_CONTRACT_CATEGORIES = ['Main Contractor', 'Finishing Works', 'Consultant', 'Other'] as const;
 
 // The miscellaneous allowance is only ever calculated on approved / finalized amounts.
 export const MISC_BASES = ['approved_finishing'] as const;
