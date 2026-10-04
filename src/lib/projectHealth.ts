@@ -1,19 +1,29 @@
 // Project setup checklist and "Needs attention" items, derived only from saved project data
 // returned by /api/projects/:id/dashboard. Nothing is estimated or marked complete without data.
 import type { Section } from './types';
+import type { DashTask, DashPhaseRow, Milestone, UpcomingItem } from './dashboard';
 
 export interface DashboardData {
-  project: { id: string; hasDriveLink?: boolean; hasSheetLink?: boolean; archived_at?: string | null };
+  project: {
+    id: string; code?: string; name?: string; hasDriveLink?: boolean; hasSheetLink?: boolean; archived_at?: string | null;
+    planned_start_date?: string | null; target_completion_date?: string | null;
+  };
+  today?: string;
+  upcomingDays?: number;
+  upcoming?: UpcomingItem[];
+  tasks?: DashTask[];
+  consultantReportsMissing?: Array<{ id: string; date: string; purpose: string; who: string | null }>;
   finance: null | {
     controlBudget: number | null; controlBudgetConfirmed: boolean;
     approvedItemCount: number; itemCount: number;
+    paid?: number; pending?: number; overdue?: number; overdueCount?: number; transactionCount?: number; unpaidCount?: number;
     overduePayments: Array<{ id: string; payee_name: string; description: string; due_date: string | null; pending: number }>;
   };
   materials: {
     total: number; awaitingConfirmation: number; responsibilityNeedsConfirmation?: number; withDate?: number;
     overdue: Array<{ id: string; description: string; category: string; date: string | null; basis: string }>;
   };
-  timeline: { total: number; scheduled?: number; phases: Array<{ blocked: number }> };
+  timeline: { total: number; scheduled?: number; phases: Array<Partial<DashPhaseRow> & { blocked: number }> };
 }
 
 export interface SetupItem {
@@ -93,43 +103,72 @@ export function buildSetupChecklist(d: DashboardData, can: Can): SetupItem[] {
   return items;
 }
 
+export type Severity = 'critical' | 'warning';
 export interface AttentionItem {
   key: string;
-  tone: 'overdue' | 'todo';
-  /** text tag shown next to the item, so status never relies on colour alone */
+  severity: Severity;
+  /** issue type, always shown as text so status never relies on colour alone */
   tag: string;
   title: string;
+  /** due date / days overdue or the reason */
   detail: string;
+  who?: string;
   href: string;
+  actionLabel: string;
+  /** days overdue (0 when not overdue), used for ordering */
+  days: number;
 }
 
-/** Actionable items, most urgent first. Record items link straight to the record. */
-export function buildAttention(d: DashboardData, opts: { maxRecords?: number; formatDate: (iso: string | null) => string; formatMoney: (n: number) => string }): AttentionItem[] {
+const daysSince = (from: string | null, today: string) => (from ? Math.max(0, Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 864e5)) : 0);
+
+/**
+ * Actionable items from saved records, critical first, then by days overdue. Every item links to its
+ * record in the current project. Overdue payments only appear for roles with financial access (the
+ * API leaves finance out otherwise); tasks and visits only when the API returned them for the role.
+ */
+export function buildAttention(d: DashboardData, opts: { formatDate: (iso: string | null) => string; formatMoney: (n: number) => string; milestone?: Milestone }): AttentionItem[] {
   const pid = d.project.id;
-  const max = opts.maxRecords ?? 4;
+  const today = d.today ?? '';
   const out: AttentionItem[] = [];
-  const more = (n: number, what: string, href: string, key: string) => {
-    if (n > 0) out.push({ key, tone: 'overdue', tag: 'Overdue', title: `${n} more ${what}`, detail: 'Open the list to see all.', href });
-  };
-
-  const od = d.materials.overdue;
-  od.slice(0, max).forEach((x) => out.push({
-    key: `mat-${x.id}`, tone: 'overdue', tag: 'Overdue delivery', title: x.description,
-    detail: `${x.category} · expected ${opts.formatDate(x.date)} (${x.basis})`, href: `#/materials/${pid}/${x.id}`,
-  }));
-  more(od.length - max, 'overdue deliveries', `#/materials/${pid}/filter:overdue`, 'mat-more');
-
-  const op = d.finance?.overduePayments ?? [];
-  op.slice(0, max).forEach((x) => out.push({
-    key: `pay-${x.id}`, tone: 'overdue', tag: 'Overdue payment', title: `${x.payee_name} — ${x.description}`,
-    detail: `due ${opts.formatDate(x.due_date)} · ${opts.formatMoney(x.pending)} pending`, href: `#/payments/${pid}/${x.id}`,
-  }));
-  more(op.length - max, 'overdue payments', `#/payments/${pid}`, 'pay-more');
-
-  const blocked = d.timeline.phases.reduce((n, p) => n + (p.blocked ?? 0), 0);
-  if (blocked) out.push({ key: 'blocked', tone: 'todo', tag: 'Blocked / on hold', title: `${blocked} timeline task(s) blocked or on hold`, detail: 'Check what is holding them up.', href: `#/timeline/${pid}` });
-  if (d.materials.awaitingConfirmation) out.push({ key: 'await', tone: 'todo', tag: 'Awaiting confirmation', title: `${d.materials.awaitingConfirmation} material line(s) awaiting confirmation`, detail: 'Status not confirmed, awaiting approval, quotation or supplier confirmation.', href: `#/materials/${pid}/filter:awaiting` });
-  const unsched = Math.max(0, d.timeline.total - (d.timeline.scheduled ?? 0));
-  if (unsched) out.push({ key: 'unsched', tone: 'todo', tag: 'Not scheduled', title: `${unsched} timeline task(s) without planned dates`, detail: 'Open the Gantt view to see them by phase.', href: `#/timeline/${pid}` });
-  return out;
+  for (const x of d.finance?.overduePayments ?? []) {
+    const days = daysSince(x.due_date, today);
+    out.push({ key: `pay-${x.id}`, severity: 'critical', tag: 'Overdue payment', title: `${x.payee_name} — ${x.description}`,
+      detail: `Due ${opts.formatDate(x.due_date)}${days ? ` · ${days} day${days === 1 ? '' : 's'} overdue` : ''} · ${opts.formatMoney(x.pending)} outstanding`,
+      who: x.payee_name, href: `#/payments/${pid}/${x.id}`, actionLabel: 'View payment', days });
+  }
+  for (const x of d.materials.overdue) {
+    const days = daysSince(x.date, today);
+    out.push({ key: `mat-${x.id}`, severity: 'critical', tag: 'Overdue delivery', title: x.description,
+      detail: `${x.category} · ${x.basis} ${opts.formatDate(x.date)}${days ? ` · ${days} day${days === 1 ? '' : 's'} overdue` : ''}`,
+      href: `#/materials/${pid}/${x.id}`, actionLabel: 'Open material', days });
+  }
+  for (const t of (d.tasks ?? []).filter((x) => x.status === 'Blocked' || x.status === 'On Hold')) {
+    out.push({ key: `task-${t.id}`, severity: 'warning', tag: t.status === 'Blocked' ? 'Blocked task' : 'Task on hold', title: t.name,
+      detail: t.planned_start || t.planned_end ? `Planned ${opts.formatDate(t.planned_start)} → ${opts.formatDate(t.planned_end)}` : 'Not scheduled',
+      who: t.assigned || undefined, href: `#/timeline/${pid}/${t.id}`, actionLabel: 'View task', days: 0 });
+  }
+  const m = opts.milestone;
+  if (m && m.kind === 'next') {
+    if (m.inDays <= (d.upcomingDays ?? 14) - 1) {
+      out.push({ key: `ms-${m.task.id}`, severity: 'warning', tag: 'Approaching milestone', title: m.task.name,
+        detail: `Inspection hold point planned ${opts.formatDate(m.date)} · ${m.inDays === 0 ? 'today' : `in ${m.inDays} day${m.inDays === 1 ? '' : 's'}`}`,
+        who: m.task.assigned || undefined, href: `#/timeline/${pid}/${m.task.id}`, actionLabel: 'View task', days: 0 });
+    }
+    if (m.blockers.length) {
+      out.push({ key: `msdep-${m.task.id}`, severity: 'warning', tag: 'Milestone waits for a blocked task', title: m.task.name,
+        detail: `Planned ${opts.formatDate(m.date)} · waits for ${m.blockers.map((b) => `${b.name} (${b.status.toLowerCase()})`).join(', ')}`,
+        who: m.task.assigned || undefined, href: `#/timeline/${pid}/${m.blockers[0].id}`, actionLabel: 'View blocked task', days: 0 });
+    }
+  }
+  for (const v of d.consultantReportsMissing ?? []) {
+    out.push({ key: `rep-${v.id}`, severity: 'warning', tag: 'Consultant report not attached', title: v.purpose,
+      detail: `Visit completed ${opts.formatDate(v.date)} · no consultant report uploaded`, who: v.who || undefined,
+      href: `#/consultant/${pid}/${v.id}`, actionLabel: 'Open visit', days: 0 });
+  }
+  if (d.materials.awaitingConfirmation) {
+    out.push({ key: 'await', severity: 'warning', tag: 'Awaiting confirmation', title: `${d.materials.awaitingConfirmation} material line(s) awaiting confirmation`,
+      detail: 'Status not confirmed, awaiting approval, quotation or supplier confirmation.', href: `#/materials/${pid}/filter:awaiting`, actionLabel: 'Show these lines', days: 0 });
+  }
+  const rank: Record<Severity, number> = { critical: 0, warning: 1 };
+  return out.map((x, i) => ({ x, i })).sort((a, b) => rank[a.x.severity] - rank[b.x.severity] || b.x.days - a.x.days || a.i - b.i).map(({ x }) => x);
 }

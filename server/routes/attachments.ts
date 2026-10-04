@@ -47,6 +47,7 @@ const READ_CAP: Record<AttachmentEntityType, Capability> = {
   work_update: 'timeline.read',
   contract: 'contracts.read',
   contract_amendment: 'contracts.read',
+  prerequisite: 'prerequisites.read',
 };
 const TABLE: Record<AttachmentEntityType, string> = {
   payment_milestone: 'payment_milestones',
@@ -57,6 +58,7 @@ const TABLE: Record<AttachmentEntityType, string> = {
   work_update: 'work_updates',
   contract: 'contracts',
   contract_amendment: 'contract_amendments',
+  prerequisite: 'project_prerequisites',
 };
 
 async function assertEntityAccess(db: pg.Pool | pg.PoolClient, req: Request, type: AttachmentEntityType, entityId: string, mode: 'read' | 'write') {
@@ -88,6 +90,9 @@ async function assertEntityAccess(db: pg.Pool | pg.PoolClient, req: Request, typ
     case 'contract':
     case 'contract_amendment':
       ok = can(u.role, 'contracts.write');
+      break;
+    case 'prerequisite':
+      ok = can(u.role, 'prerequisites.write');
       break;
   }
   if (!ok) throw forbidden();

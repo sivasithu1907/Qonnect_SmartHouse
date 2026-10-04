@@ -22,6 +22,7 @@ import { Notifier } from './notify/notifier';
 import { createWebPushSender, type PushSender } from './notify/push';
 import { attachmentRoutes } from './routes/attachments';
 import { contractRoutes } from './routes/contracts';
+import { prerequisiteRoutes } from './routes/prerequisites';
 import { dashboardRoutes, portfolioRoute } from './routes/dashboard';
 
 export interface AppOptions {
@@ -76,6 +77,7 @@ export function createApp(pool: pg.Pool, cfg: AppConfig, opts: AppOptions = {}) 
   project.use('/categories', categoryRoutes(pool));
   project.use('/payments', paymentRoutes(pool, cfg.timeZone));
   project.use('/contracts', contractRoutes(pool, cfg.timeZone));
+  project.use('/prerequisites', prerequisiteRoutes(pool, cfg.timeZone));
   project.use('/materials', materialRoutes(pool, notifier));
   project.use('/visits', visitRoutes(pool, notifier));
   project.use('/timeline', timelineRoutes(pool, notifier));

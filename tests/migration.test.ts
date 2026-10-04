@@ -109,9 +109,22 @@ describe('migration 002 on existing data', () => {
     await q('DELETE FROM contracts WHERE id = $1', [k]);
   });
 
+  it('005 adds an empty prerequisites table and allows prerequisite files; nothing else changes', async () => {
+    expect((await q('SELECT count(*)::int n FROM project_prerequisites'))[0].n).toBe(0);
+    expect(await q('SELECT entity_type, kind, original_name FROM attachments')).toEqual([{ entity_type: 'payment_milestone', kind: 'payment_slip', original_name: 'slip.pdf' }]);
+    const k = (await q(`INSERT INTO project_prerequisites (project_id, title) VALUES ($1, 'Permit') RETURNING id`, [pid]))[0].id;
+    await q(`INSERT INTO attachments (project_id, entity_type, entity_id, kind, original_name, stored_name, mime_type, size_bytes, sha256)
+      VALUES ($1,'prerequisite',$2,'supporting_document','p.pdf','stored-p.pdf','application/pdf',10,'p')`, [pid, k]);
+    // a completed item needs a completion date and a recorded decision
+    await expect(pool.query(`UPDATE project_prerequisites SET status = 'Completed' WHERE id = $1`, [k])).rejects.toThrow();
+    await expect(pool.query(`UPDATE project_prerequisites SET status = 'Not applicable' WHERE id = $1`, [k])).rejects.toThrow();
+    await q('DELETE FROM attachments WHERE entity_id = $1', [k]);
+    await q('DELETE FROM project_prerequisites WHERE id = $1', [k]);
+  });
+
   it('is recorded once and not re-applied', async () => {
     expect((await q('SELECT filename FROM schema_migrations ORDER BY 1')).map((r) => r.filename)).toEqual([
-      '001_init.sql', '002_finalized_budget_and_categories.sql', '003_notifications_push.sql', '004_contracts.sql',
+      '001_init.sql', '002_finalized_budget_and_categories.sql', '003_notifications_push.sql', '004_contracts.sql', '005_prerequisites.sql',
     ]);
     expect(await runMigrations(pool, path.resolve('migrations'), () => undefined)).toEqual([]);
   });

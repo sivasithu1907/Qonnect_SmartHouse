@@ -25,6 +25,8 @@ export type Capability =
   | 'audit.read'
   | 'contracts.read'       // Contracts & Documents register, files and amendments
   | 'contracts.write'      // add / edit / archive contracts, amendments and contract files
+  | 'prerequisites.read'   // project prerequisites & documents checklist
+  | 'prerequisites.write'  // add / edit / reorder / archive prerequisites, record decisions, attach files
   | 'categories.manage';   // add / rename / reorder / archive / delete budget, material and contract categories
 
 const MATRIX: Record<Role, Capability[]> = {
@@ -32,17 +34,18 @@ const MATRIX: Record<Role, Capability[]> = {
     'projects.manage', 'users.manage', 'links.edit', 'budget.read', 'budget.write', 'payments.read', 'payments.write',
     'materials.read', 'materials.write', 'consultant.read', 'consultant.write', 'site.read', 'site.write',
     'timeline.read', 'timeline.write', 'workupdates.write', 'audit.read', 'categories.manage',
-    'contracts.read', 'contracts.write',
+    'contracts.read', 'contracts.write', 'prerequisites.read', 'prerequisites.write',
   ],
   project_manager: [
     'links.edit', 'budget.read', 'payments.read', 'payments.write', 'materials.read', 'materials.write',
     'consultant.read', 'consultant.write', 'site.read', 'site.write', 'timeline.read', 'timeline.write',
     'workupdates.write', 'audit.read', 'contracts.read', 'contracts.write',
+    'prerequisites.read', 'prerequisites.write',
   ],
   contractor: ['materials.read', 'materials.contractor', 'consultant.read', 'site.read', 'site.assigned', 'timeline.read', 'workupdates.write'],
   consultant: ['materials.read', 'consultant.read', 'consultant.own', 'site.read', 'site.assigned', 'timeline.read'],
   // Contractors and consultants do not see the contract register: it holds other parties' agreements and values.
-  viewer: ['budget.read', 'payments.read', 'materials.read', 'consultant.read', 'site.read', 'timeline.read', 'contracts.read'],
+  viewer: ['budget.read', 'payments.read', 'materials.read', 'consultant.read', 'site.read', 'timeline.read', 'contracts.read', 'prerequisites.read'],
 };
 
 export function can(role: Role, cap: Capability): boolean {

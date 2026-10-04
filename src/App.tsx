@@ -169,7 +169,7 @@ function Shell() {
         {needsProject && !current && <EmptyState title="No project selected">You are not assigned to any active project yet. Ask an administrator for access.</EmptyState>}
         {needsProject && current && (
           <React.Fragment key={pageKey}>
-            {section === 'dashboard' && <Dashboard project={current} onNavigate={setSection} onSettings={() => setSettingsOpen(true)} />}
+            {section === 'dashboard' && <Dashboard key={current.id} project={current} onNavigate={setSection} onSettings={() => setSettingsOpen(true)} />}
             {section === 'budget' && <Budget project={current} onSettings={() => setSettingsOpen(true)} />}
             {section === 'payments' && <Payments project={current} {...focusProps} />}
             {section === 'contracts' && <Contracts project={current} {...focusProps} />}

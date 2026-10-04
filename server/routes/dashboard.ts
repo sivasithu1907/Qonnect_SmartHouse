@@ -6,7 +6,7 @@ import { loadBudget, budgetSummary } from './budget';
 import { loadPayments } from './payments';
 import { loadMaterials } from './materials';
 import { loadTimeline } from './timeline';
-import { addDaysISO, AWAITING_CONFIRMATION_STATUSES, effectiveDeliveryDate, isMaterialOpen, sumMoney, todayISO } from '../../shared/calc';
+import { addDaysISO, AWAITING_CONFIRMATION_STATUSES, effectiveDeliveryDate, expectedDeliveryDate, isMaterialOpen, sumMoney, todayISO } from '../../shared/calc';
 import { SUPPLY_RESPONSIBILITY_LABELS } from '../../shared/constants';
 
 function materialStats(items: any[], today: string) {
@@ -29,6 +29,46 @@ function materialStats(items: any[], today: string) {
     responsibilityNeedsConfirmation: live.filter((m) => m.supply_responsibility === 'needs_confirmation').length,
     withDate: withEff.filter((m) => m.actual_delivery_date || m.eff.date).length,
   };
+}
+
+/** Days covered by the dashboard's "Next 14 days" panel: today plus the following 13 days. */
+export const UPCOMING_DAYS = 14;
+
+/**
+ * Dated activity in [today, today + 13] for the "Next 14 days" panel. Overdue records are left out
+ * (they belong to Needs attention). Material dates follow the existing expected-date precedence
+ * (revised > supplier-confirmed > planned > required on site) and keep their label.
+ */
+function upcomingActivity(pid: string, today: string, materials: any[], tasks: any[], consultant: any[], site: any[]) {
+  const end = addDaysISO(today, UPCOMING_DAYS - 1);
+  const inWindow = (d: string | null | undefined) => !!d && d >= today && d <= end;
+  const out: Array<Record<string, unknown>> = [];
+  for (const m of materials) {
+    if (m.archived_at || !isMaterialOpen(m.status) || m.actual_delivery_date) continue;
+    const e = expectedDeliveryDate(m);
+    if (!e || !inWindow(e.date)) continue;
+    const resp = SUPPLY_RESPONSIBILITY_LABELS[m.supply_responsibility as keyof typeof SUPPLY_RESPONSIBILITY_LABELS] ?? '';
+    out.push({ key: `material-${m.id}`, kind: 'material', id: m.id, date: e.date, dateLabel: e.label, title: m.description, context: m.category,
+      who: [resp, m.assigned_contractor_name || m.vendor].filter(Boolean).join(' · '), status: m.status, href: `#/materials/${pid}/${m.id}` });
+  }
+  for (const t of tasks) {
+    if (t.status === 'Completed') continue;
+    const start = inWindow(t.planned_start);
+    if (!start && !inWindow(t.planned_end)) continue;
+    out.push({ key: `task-${t.id}`, kind: 'task', id: t.id, date: start ? t.planned_start : t.planned_end,
+      dateLabel: `${t.is_hold_point ? 'Hold point · ' : ''}${start ? 'Planned start' : 'Planned finish'}`, title: t.name, context: t.phase_label,
+      who: t.assigned_user_name || t.responsible || '', status: t.status, href: `#/timeline/${pid}/${t.id}` });
+  }
+  for (const v of consultant) {
+    out.push({ key: `consultant-${v.id}`, kind: 'consultant_visit', id: v.id, date: v.date, dateLabel: 'Consultant visit / inspection', title: v.purpose, context: '',
+      who: v.who || '', status: v.status, href: `#/consultant/${pid}/${v.id}` });
+  }
+  for (const v of site) {
+    out.push({ key: `site-${v.id}`, kind: 'site_visit', id: v.id, date: v.date, dateLabel: 'Site visit', title: v.purpose, context: '',
+      who: v.who || '', status: v.status, href: `#/site/${pid}/${v.id}` });
+  }
+  const order: Record<string, number> = { material: 0, task: 1, consultant_visit: 2, site_visit: 3 };
+  return out.sort((a, b) => String(a.date).localeCompare(String(b.date)) || order[a.kind as string] - order[b.kind as string] || String(a.title).localeCompare(String(b.title)));
 }
 
 function timelineStats(t: Awaited<ReturnType<typeof loadTimeline>>) {
@@ -54,7 +94,8 @@ export async function projectDashboard(pool: pg.Pool, project: Record<string, an
   const pid = project.id as string;
   const today = todayISO(timeZone);
   const showFinance = can(role, 'budget.read') && can(role, 'payments.read');
-  const [materials, timeline, cv, sv] = await Promise.all([
+  const upcomingEnd = addDaysISO(today, UPCOMING_DAYS - 1);
+  const [materials, timeline, cv, sv, cvWindow, svWindow, reportsMissing] = await Promise.all([
     loadMaterials(pool, pid),
     loadTimeline(pool, pid),
     pool.query(
@@ -66,6 +107,28 @@ export async function projectDashboard(pool: pg.Pool, project: Record<string, an
          LEFT JOIN users u ON u.id = v.assigned_user_id
         WHERE v.project_id = $1 AND v.archived_at IS NULL AND v.status IN ('Planned','Rescheduled') AND v.visit_at >= now() - interval '1 day'
         ORDER BY v.visit_at LIMIT 10`, [pid]),
+    // visits on a local calendar date (application time zone) inside the next-14-days window
+    can(role, 'consultant.read') ? pool.query(
+      `SELECT v.id, (v.planned_at AT TIME ZONE $2)::date AS date, v.purpose, v.status, COALESCE(NULLIF(u.name, ''), v.consultant_name) AS who
+         FROM consultant_visits v LEFT JOIN users u ON u.id = v.consultant_user_id
+        WHERE v.project_id = $1 AND v.archived_at IS NULL AND v.status IN ('Planned','Rescheduled','In Progress')
+          AND (v.planned_at AT TIME ZONE $2)::date BETWEEN $3 AND $4
+        ORDER BY v.planned_at`, [pid, timeZone, today, upcomingEnd]) : { rows: [] },
+    can(role, 'site.read') ? pool.query(
+      `SELECT v.id, (v.visit_at AT TIME ZONE $2)::date AS date, v.purpose, v.status, COALESCE(NULLIF(u.name, ''), v.assigned_name) AS who
+         FROM site_visits v LEFT JOIN users u ON u.id = v.assigned_user_id
+        WHERE v.project_id = $1 AND v.archived_at IS NULL AND v.status IN ('Planned','Rescheduled','In Progress')
+          AND (v.visit_at AT TIME ZONE $2)::date BETWEEN $3 AND $4
+        ORDER BY v.visit_at`, [pid, timeZone, today, upcomingEnd]) : { rows: [] },
+    // completed consultant visits (last 30 days) with no consultant report attached
+    can(role, 'consultant.read') ? pool.query(
+      `SELECT v.id, (v.planned_at AT TIME ZONE $2)::date AS date, v.purpose, COALESCE(NULLIF(u.name, ''), v.consultant_name) AS who
+         FROM consultant_visits v LEFT JOIN users u ON u.id = v.consultant_user_id
+        WHERE v.project_id = $1 AND v.archived_at IS NULL AND v.status = 'Completed' AND v.planned_at IS NOT NULL
+          AND (v.planned_at AT TIME ZONE $2)::date BETWEEN $3 AND $4
+          AND NOT EXISTS (SELECT 1 FROM attachments a WHERE a.project_id = v.project_id AND a.entity_type = 'consultant_visit'
+                            AND a.entity_id = v.id AND a.kind = 'consultant_report' AND a.archived_at IS NULL)
+        ORDER BY v.planned_at`, [pid, timeZone, addDaysISO(today, -30), today]) : { rows: [] },
   ]);
 
   let finance: Record<string, unknown> | null = null;
@@ -92,6 +155,8 @@ export async function projectDashboard(pool: pg.Pool, project: Record<string, an
       overdue: p.totals.overdue,
       overdueCount: p.totals.overdueCount,
       overpaid: p.totals.overpaid,
+      transactionCount: p.totals.transactionCount,
+      unpaidCount: live.filter((m) => m.balance.pending > 0).length,
       misc: s.misc,
       byCategory: s.byCategory,
       upcomingPayments: live
@@ -110,9 +175,30 @@ export async function projectDashboard(pool: pg.Pool, project: Record<string, an
     responsibility[k] = (responsibility[k] ?? 0) + 1;
   }
 
+  const canTimeline = can(role, 'timeline.read');
+  const phaseById = new Map(timeline.phases.map((p) => [p.id, p]));
+  const tasks = canTimeline
+    ? timeline.tasks.map((t) => ({
+        id: t.id, phase_id: t.phase_id, name: t.name, status: t.status, planned_start: t.planned_start, planned_end: t.planned_end,
+        is_hold_point: t.is_hold_point, depends_on: t.depends_on, assigned: t.assigned_user_name || t.responsible || '', notes: t.notes,
+      }))
+    : [];
+  const upcoming = upcomingActivity(pid, today,
+    can(role, 'materials.read') ? materials.items : [],
+    canTimeline ? timeline.tasks.map((t) => ({ ...t, phase_label: phaseById.has(t.phase_id) ? `Phase ${phaseById.get(t.phase_id).seq}` : '' })) : [],
+    cvWindow.rows, svWindow.rows);
+
   return {
-    project: { id: pid, code: project.code, name: project.name, location: project.location, status: project.status, archived_at: project.archived_at, hasDriveLink: !!project.drive_folder_url, hasSheetLink: !!project.sheets_url },
+    project: {
+      id: pid, code: project.code, name: project.name, location: project.location, status: project.status, archived_at: project.archived_at,
+      hasDriveLink: !!project.drive_folder_url, hasSheetLink: !!project.sheets_url,
+      planned_start_date: project.planned_start_date, target_completion_date: project.target_completion_date,
+    },
     today,
+    upcomingDays: UPCOMING_DAYS,
+    upcoming,
+    tasks,
+    consultantReportsMissing: reportsMissing.rows,
     finance,
     materials: { ...materialStats(materials.items, today), responsibility },
     upcomingConsultantVisits: cv.rows,

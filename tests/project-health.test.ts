@@ -2,6 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildAttention, buildSetupChecklist, type DashboardData } from '../src/lib/projectHealth';
 import { filterProjects } from '../src/components/Header';
+import { nextMilestone, type DashTask } from '../src/lib/dashboard';
 import { capabilitiesFor } from '../server/permissions';
 import type { Project } from '../src/lib/types';
 import { setup, type Ctx } from './helpers';
@@ -61,30 +62,37 @@ describe('setup checklist', () => {
 });
 
 describe('needs attention', () => {
-  it('lists overdue records first with links to the record, then actionable counts', () => {
+  const task = (id: string, status: string, over: Partial<DashTask> = {}): DashTask => ({ id, phase_id: 'ph', name: `Task ${id}`, status, planned_start: '2026-10-20', planned_end: '2026-10-30', is_hold_point: false, depends_on: [], assigned: 'MEP subcontractor', notes: '', ...over });
+  it('lists critical items first (most overdue first), each with a severity, a label and a link to the record', () => {
+    const tasks = [task('t1', 'Blocked'), task('t2', 'Scheduled', { is_hold_point: true, planned_start: '2026-10-25', planned_end: '2026-10-26', depends_on: ['t1'] })];
     const d = base({
-      materials: { total: 3, awaitingConfirmation: 2, overdue: [{ id: 'm1', description: 'Ceramic tiles', category: 'Tiles', date: '2026-09-29', basis: 'Planned' }] },
-      finance: { ...base().finance!, overduePayments: [{ id: 'x1', payee_name: 'Contractor', description: 'Milestone 1', due_date: '2026-09-01', pending: 600 }] },
-      timeline: { total: 5, scheduled: 2, phases: [{ blocked: 1 }] },
+      today: '2026-10-15',
+      materials: { total: 3, awaitingConfirmation: 2, overdue: [{ id: 'm1', description: 'Ceramic tiles', category: 'Tiles', date: '2026-10-10', basis: 'Planned' }] },
+      finance: { ...base().finance!, overduePayments: [{ id: 'x1', payee_name: 'Contractor', description: 'Milestone 1', due_date: '2026-10-01', pending: 600 }] },
+      tasks,
+      consultantReportsMissing: [{ id: 'v1', date: '2026-10-08', purpose: 'Backfill inspection', who: 'Consultant' }],
     });
-    const a = buildAttention(d, fmt);
-    expect(a.map((i) => i.key)).toEqual(['mat-m1', 'pay-x1', 'blocked', 'await', 'unsched']);
-    expect(a[0]).toMatchObject({ tag: 'Overdue delivery', href: '#/materials/p1/m1', detail: 'Tiles · expected 2026-09-29 (Planned)' });
-    expect(a[1]).toMatchObject({ tag: 'Overdue payment', href: '#/payments/p1/x1' });
-    expect(a.find((i) => i.key === 'unsched')!.title).toBe('3 timeline task(s) without planned dates');
-    expect(a.find((i) => i.key === 'await')!.href).toBe('#/materials/p1/filter:awaiting');
-    expect(a.every((i) => i.tag.length > 0)).toBe(true); // status is always spelled out, not colour only
+    const a = buildAttention(d, { ...fmt, milestone: nextMilestone(tasks, '2026-10-15') });
+    expect(a.map((i) => i.key)).toEqual(['pay-x1', 'mat-m1', 'task-t1', 'ms-t2', 'msdep-t2', 'rep-v1', 'await']);
+    expect(a[0]).toMatchObject({ severity: 'critical', tag: 'Overdue payment', href: '#/payments/p1/x1', actionLabel: 'View payment', days: 14 });
+    expect(a[0].detail).toContain('14 days overdue');
+    expect(a[1]).toMatchObject({ tag: 'Overdue delivery', href: '#/materials/p1/m1', actionLabel: 'Open material', days: 5 });
+    expect(a[2]).toMatchObject({ severity: 'warning', tag: 'Blocked task', href: '#/timeline/p1/t1', who: 'MEP subcontractor' });
+    expect(a[3]).toMatchObject({ tag: 'Approaching milestone', href: '#/timeline/p1/t2' });
+    expect(a[4]).toMatchObject({ tag: 'Milestone waits for a blocked task', href: '#/timeline/p1/t1' });
+    expect(a[5]).toMatchObject({ tag: 'Consultant report not attached', href: '#/consultant/p1/v1', actionLabel: 'Open visit' });
+    expect(a[6].href).toBe('#/materials/p1/filter:awaiting');
+    expect(a.every((i) => i.tag.length > 0 && i.actionLabel.length > 0)).toBe(true);
   });
 
-  it('caps record lists and links to the full list; no finance items without finance access', () => {
+  it('has no finance items without finance access and lists every record (the panel shows "Showing X of Y")', () => {
     const overdue = Array.from({ length: 7 }, (_, i) => ({ id: `m${i}`, description: `Line ${i}`, category: 'C', date: '2026-09-01', basis: 'Planned' }));
-    const a = buildAttention(base({ finance: null, materials: { total: 7, awaitingConfirmation: 0, overdue }, timeline: { total: 0, scheduled: 0, phases: [] } }), { ...fmt, maxRecords: 4 });
-    expect(a.filter((i) => /^mat-m\d/.test(i.key))).toHaveLength(4);
-    expect(a.find((i) => i.key === 'mat-more')).toMatchObject({ title: '3 more overdue deliveries', href: '#/materials/p1/filter:overdue' });
+    const a = buildAttention(base({ finance: null, materials: { total: 7, awaitingConfirmation: 0, overdue }, timeline: { total: 0, scheduled: 0, phases: [] } }), fmt);
+    expect(a.filter((i) => /^mat-m\d/.test(i.key))).toHaveLength(7);
     expect(a.some((i) => i.key.startsWith('pay'))).toBe(false);
   });
 
-  it('is empty when nothing is overdue or waiting', () => {
+  it('is empty when nothing is overdue, blocked or waiting', () => {
     expect(buildAttention(base({ materials: { total: 1, awaitingConfirmation: 0, overdue: [] }, timeline: { total: 2, scheduled: 2, phases: [{ blocked: 0 }] } }), fmt)).toEqual([]);
   });
 });

@@ -71,6 +71,7 @@ export const ATTACHMENT_ENTITY_TYPES = [
   'work_update',
   'contract',
   'contract_amendment',
+  'prerequisite',
 ] as const;
 export type AttachmentEntityType = (typeof ATTACHMENT_ENTITY_TYPES)[number];
 
@@ -94,9 +95,16 @@ export const ATTACHMENT_KIND_LABELS: Record<AttachmentKind, string> = {
 export const CONTRACT_DOCUMENT_KINDS = ['signed_contract', 'quotation', 'boq', 'amendment', 'supporting_document'] as const satisfies readonly AttachmentKind[];
 export const GENERAL_ATTACHMENT_KINDS = ['payment_slip', 'consultant_report', 'delivery_note', 'site_photo', 'supporting_document'] as const satisfies readonly AttachmentKind[];
 /** Which document types each record type accepts (checked on the server). */
+/** Document types offered for prerequisite files (permits, surveys, reports, agreements, BOQs). */
+export const PREREQUISITE_DOCUMENT_KINDS = ['supporting_document', 'consultant_report', 'signed_contract', 'boq'] as const satisfies readonly AttachmentKind[];
 export function attachmentKindsFor(entityType: AttachmentEntityType): readonly AttachmentKind[] {
+  if (entityType === 'prerequisite') return PREREQUISITE_DOCUMENT_KINDS;
   return entityType === 'contract' || entityType === 'contract_amendment' ? CONTRACT_DOCUMENT_KINDS : GENERAL_ATTACHMENT_KINDS;
 }
+
+// Prerequisites & documents checklist (project-specific records; nothing is created automatically)
+export const PREREQUISITE_STATUSES = ['Not started', 'In progress', 'Awaiting review', 'Completed', 'Not applicable'] as const;
+export type PrerequisiteStatus = (typeof PREREQUISITE_STATUSES)[number];
 
 // Contracts & Documents
 export const CONTRACT_STATUSES = ['Draft', 'Signed', 'Active', 'Completed', 'Terminated'] as const;
