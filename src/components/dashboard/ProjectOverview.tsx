@@ -50,7 +50,7 @@ export function ProjectOverview({ project, tasks, phases, milestone, upcomingDay
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 xl:grid-cols-[minmax(13rem,1fr)_minmax(15rem,1.5fr)_minmax(8.5rem,0.65fr)_minmax(8.5rem,0.65fr)_minmax(14rem,1.25fr)] gap-3">
+      <div className="mt-4 grid grid-cols-2 xl:grid-cols-[minmax(12rem,0.9fr)_minmax(16rem,1.7fr)_minmax(8rem,0.5fr)_minmax(8rem,0.5fr)_minmax(15rem,1.5fr)] gap-3">
         <Stat label="Task completion" className="col-span-2 sm:col-span-1" info={
           <InfoPopover label="About task completion">Completed tasks divided by all timeline tasks. It counts tasks marked Completed in the Timeline and is <b>not</b> consultant-certified physical construction progress.</InfoPopover>
         }>
@@ -102,8 +102,7 @@ export function ProjectOverview({ project, tasks, phases, milestone, upcomingDay
         <ul className="mt-3 flex flex-wrap gap-2" aria-label="Missing information">
           {(scheduleNotSet || c.total === 0) && (
             <li className="inline-flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-1.5 text-sm text-amber-900">
-              <span className="font-semibold">{c.total === 0 ? 'No timeline tasks' : 'Schedule not set'}</span>
-              {canTimeline && <a href={timelineHref} className="font-semibold text-sky-700 hover:text-sky-900">Open timeline</a>}
+              <span><b>{c.total === 0 ? 'No timeline tasks yet.' : 'Schedule not set.'}</b> {c.total === 0 ? 'Add tasks in the timeline.' : 'No task has planned dates yet.'}</span>
             </li>
           )}
           {budgetUnconfirmed && (

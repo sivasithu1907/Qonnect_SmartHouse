@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Archive, Coins, Download, Pencil, Plus, RotateCcw, Table as TableIcon } from 'lucide-react';
+import { AlertTriangle, Archive, Coins, Download, Info, Pencil, Plus, RotateCcw, Table as TableIcon } from 'lucide-react';
 import { patch, post } from '../lib/api';
 import { useApi } from '../lib/hooks';
 import { useSession } from '../lib/session';
@@ -58,7 +58,7 @@ export function Budget({ project, onSettings }: { project: Project; onSettings: 
   const tabs = [{ id: 'items' as const, label: 'Budget items' }, ...(manageCats ? [{ id: 'categories' as const, label: 'Manage categories' }] : [])];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <PageHeader icon={<Coins className="w-5 h-5" />} title="Master Items & Budget" subtitle={`${project.name} — ${project.code}`}
         actions={<>
           <LinkButton href={project.sheets_url} label="Budget comparison sheet" tone="emerald" icon={<TableIcon className="w-3.5 h-3.5" />} />
@@ -66,33 +66,35 @@ export function Budget({ project, onSettings }: { project: Project; onSettings: 
           {admin && <Button variant="primary" onClick={() => { setTab('items'); setEditing({ row: null }); }}><Plus className="w-4 h-4" />Item</Button>}
         </>} />
 
-      <Notice>
-        Each item has one amount: the <b>Approved / Finalized Amount (QAR)</b>. It stays blank and marked <b>Needs confirmation</b> until an authorised admin enters the final amount.
-        Budget comparisons are kept in the linked Google Sheet.
-        {project.control_budget === null || !project.control_budget_confirmed ? <> The project control budget is <b>Needs confirmation</b>.</> : <> Control budget confirmed: <b>{formatQAR(project.control_budget)}</b>.</>}
-      </Notice>
+      <p className="-mt-3 flex items-center gap-1.5 text-sm text-slate-500"><Info className="w-4 h-4 shrink-0 text-slate-400" aria-hidden="true" />Amounts are managed here. Quote comparisons are available in the linked Google Sheet.</p>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <Card className="lg:col-span-2" title="Budget summary" subtitle="Finalized amounts of active items, plus the miscellaneous allowance. Contract values and payments are not included.">
-          <BudgetSummary s={s} onSettings={onSettings} canEditPct={can('projects.manage') && !project.archived_at} miscCategoryNames={miscLikeCategories} />
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+        <Card className="lg:col-span-2" title="Budget summary" subtitle="Finalized amounts of active items plus the miscellaneous allowance. Contract values and payments are not included.">
+          <BudgetSummary s={s} canConfirmBudget={can('projects.manage') && !project.archived_at} onSettings={onSettings} miscCategoryNames={miscLikeCategories} />
         </Card>
         <div className="space-y-4">
           <Card title="Miscellaneous allowance" actions={can('projects.manage') && !project.archived_at && <Button size="sm" onClick={onSettings}><Pencil className="w-3.5 h-3.5" />Edit %</Button>}>
-            <div className="text-2xl font-bold font-mono text-slate-900">{formatQAR(misc.allowance)}</div>
-            <p className="text-xs text-slate-600 mt-1">{misc.percentage}% × {formatQAR(misc.basisAmount)}</p>
-            <p className="text-[11px] text-slate-500 mt-2">Basis: finalized amounts of finishing categories included in the misc basis ({misc.itemsCounted} item(s){misc.itemsMissingValue ? `; ${misc.itemsMissingValue} still need confirmation` : ''}). Fixed costs are excluded.</p>
+            <dl className="text-sm space-y-1.5">
+              <div className="flex justify-between gap-3"><dt className="text-slate-600">Percentage</dt><dd className="font-mono tabular-nums font-semibold text-slate-900">{misc.percentage}%</dd></div>
+              <div className="flex justify-between gap-3"><dt className="text-slate-600">Eligible basis</dt><dd className="font-mono tabular-nums text-slate-900">{formatQAR(misc.basisAmount)}</dd></div>
+              <div className="flex justify-between gap-3 border-t border-slate-100 pt-1.5"><dt className="font-semibold text-slate-800">Allowance</dt><dd className="font-mono tabular-nums font-bold text-slate-900">{formatQAR(misc.allowance)}</dd></div>
+            </dl>
+            <p className="text-xs text-slate-500 mt-2">Eligible basis: finalized amounts of finishing categories included in the misc basis ({misc.itemsCounted} item{misc.itemsCounted === 1 ? '' : 's'}{misc.itemsMissingValue ? `; ${misc.itemsMissingValue} without an amount` : ''}). Fixed costs are excluded.</p>
           </Card>
           <Card title="Scheduled vs paid">
-            <div className="text-sm text-slate-700 space-y-1">
-              <div className="flex justify-between gap-2"><span>Scheduled payment commitments</span><b className="font-mono">{formatQAR(s.scheduled)}</b></div>
-              <div className="flex justify-between gap-2"><span>Actual recorded payments</span><b className="font-mono text-sky-700">{formatQAR(s.paid)}</b></div>
-            </div>
-            <p className="text-[11px] text-slate-500 mt-2">For payment milestones linked to budget items.</p>
+            <dl className="text-sm space-y-1.5">
+              <div className="flex justify-between gap-3"><dt className="text-slate-600">Scheduled payments</dt><dd className="font-mono tabular-nums font-semibold text-slate-900">{formatQAR(s.scheduled)}</dd></div>
+              <div className="flex justify-between gap-3"><dt className="text-slate-600">Recorded payments</dt><dd className="font-mono tabular-nums font-semibold text-sky-700">{formatQAR(s.paid)}</dd></div>
+            </dl>
+            <p className="text-xs text-slate-500 mt-2">Payment milestones linked to budget items.</p>
           </Card>
         </div>
       </div>
 
-      {tabs.length > 1 && <Tabs value={tab} onChange={setTab} tabs={tabs} />}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {tabs.length > 1 ? <Tabs value={tab} onChange={setTab} tabs={tabs} /> : <span />}
+        {tab === 'items' && <label className="flex items-center gap-1.5 text-sm text-slate-600"><input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />Show archived</label>}
+      </div>
 
       {tab === 'categories' && manageCats ? (
         <Card title="Manage categories" subtitle="Add, rename, reorder and archive this project's budget and material categories.">
@@ -100,9 +102,6 @@ export function Budget({ project, onSettings }: { project: Project; onSettings: 
         </Card>
       ) : (
         <>
-          <div className="flex justify-end">
-            <label className="flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />Show archived</label>
-          </div>
           {cats.length === 0 ? <EmptyState title="No budget categories yet">{manageCats ? 'Add categories in Manage categories.' : ''}</EmptyState> : (['fixed', 'finishing', 'other'] as const).map((kind) => {
             const group = cats.filter((c) => c.kind === kind);
             if (!group.length) return null;
@@ -185,56 +184,73 @@ export function Budget({ project, onSettings }: { project: Project; onSettings: 
 
 const KIND_SUBTOTAL_LABEL: Record<string, string> = { fixed: 'Fixed costs', finishing: 'Finishing items', other: 'Other items' };
 
-/** Subtotal by kind → finalized items subtotal → + miscellaneous → grand total → control budget → difference. */
-export function BudgetSummary({ s, onSettings, canEditPct, miscCategoryNames }: { s: BudgetResponse['summary']; onSettings: () => void; canEditPct: boolean; miscCategoryNames: string[] }) {
+/**
+ * Subtotals by kind → finalized items subtotal → miscellaneous allowance → grand total (strongest emphasis) →
+ * confirmed control budget → above budget / not allocated. Contextual warnings appear once, at the end.
+ */
+export function BudgetSummary({ s, canConfirmBudget, onSettings, miscCategoryNames }: { s: BudgetResponse['summary']; canConfirmBudget: boolean; onSettings: () => void; miscCategoryNames: string[] }) {
   const it = s.itemized;
-  const row = 'flex items-baseline justify-between gap-3 py-1.5';
+  const row = 'flex items-baseline justify-between gap-4 py-1.5';
+  const amt = 'font-mono tabular-nums text-right whitespace-nowrap';
   return (
     <div className="text-sm">
       <dl>
-        {s.byKind.filter((k) => k.itemCount > 0).map((k) => (
-          <div key={k.kind} className={`${row} text-slate-600`}>
-            <dt>{KIND_SUBTOTAL_LABEL[k.kind]}{k.missingCount > 0 && <span className="ml-1 text-xs text-amber-800">({k.missingCount} missing)</span>}</dt>
-            <dd className="font-mono">{formatQAR(k.subtotal)}</dd>
-          </div>
-        ))}
-        <div className={`${row} border-t border-slate-200 font-semibold text-slate-900`}>
-          <dt>Finalized items subtotal</dt><dd className="font-mono">{formatQAR(it.finalizedSubtotal)}</dd>
+        <div className="pb-1">
+          {s.byKind.filter((k) => k.itemCount > 0).map((k) => (
+            <div key={k.kind} className={`${row} text-slate-600`}>
+              <dt>{KIND_SUBTOTAL_LABEL[k.kind]}{k.missingCount > 0 && <span className="ml-1.5 text-xs text-amber-800">{k.missingCount} without an amount</span>}</dt>
+              <dd className={amt}>{formatQAR(k.subtotal)}</dd>
+            </div>
+          ))}
         </div>
-        <div className={`${row} text-slate-700`}>
-          <dt>+ Miscellaneous allowance <span className="text-xs text-slate-500">({s.misc.percentage}% of eligible finishing items)</span>
-            {canEditPct && <button type="button" onClick={onSettings} className="ml-2 text-xs font-semibold text-sky-700 hover:text-sky-900">Edit %</button>}</dt>
-          <dd className="font-mono">{formatQAR(it.miscAllowance)}</dd>
+        <div className="border-t border-slate-100 pt-1">
+          <div className={`${row} font-semibold text-slate-900`}><dt>Finalized items subtotal</dt><dd className={amt}>{formatQAR(it.finalizedSubtotal)}</dd></div>
+          <div className={`${row} text-slate-600`}><dt>Miscellaneous allowance <span className="text-xs text-slate-500">({s.misc.percentage}% of eligible finishing items)</span></dt><dd className={amt}>{formatQAR(it.miscAllowance)}</dd></div>
         </div>
-        <div className="flex items-baseline justify-between gap-3 py-2.5 mt-1 border-y-2 border-slate-900/80">
+        <div className="my-2 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-lg bg-slate-50 border border-slate-200 px-4 py-3">
           <dt className="text-base font-bold text-slate-900">Grand total including miscellaneous{!it.complete && <span className="ml-2 align-middle"><Badge tone="amber">Incomplete</Badge></span>}</dt>
-          <dd className="text-xl sm:text-2xl font-bold font-mono text-slate-900">{formatQAR(it.grandTotal)}</dd>
+          <dd className={`${amt} text-2xl font-bold text-slate-900`}>{formatQAR(it.grandTotal)}</dd>
         </div>
-        <div className={`${row} mt-1 text-slate-700`}>
-          <dt>Confirmed control budget</dt>
-          <dd className="font-mono">{it.controlBudgetConfirmed ? formatQAR(it.controlBudget) : <NeedsConfirmation />}</dd>
+        <div className="pt-1">
+          <div className={`${row} text-slate-700`}>
+            <dt>Confirmed control budget</dt>
+            <dd className={amt}>{it.controlBudgetConfirmed ? formatQAR(it.controlBudget) : <NeedsConfirmation />}</dd>
+          </div>
+          {it.difference !== null && (
+            it.aboveControl > 0 ? (
+              <div className={`${row} font-semibold text-rose-700`}><dt>Above budget{!it.complete ? ' (at least)' : ''}</dt><dd className={amt}>{formatQAR(it.aboveControl)}</dd></div>
+            ) : it.complete ? (
+              <div className={`${row} font-semibold text-slate-900`}><dt>Budget not allocated to items</dt><dd className={amt}>{formatQAR(it.notAllocated)}</dd></div>
+            ) : (
+              <div className={`${row} text-slate-600`}><dt>Difference against budget</dt><dd className="text-xs text-right">Shown when every item has an amount</dd></div>
+            )
+          )}
         </div>
-        {it.difference !== null && (
-          it.aboveControl > 0 ? (
-            <div className={`${row} font-semibold text-rose-700`}><dt>Above control budget{!it.complete ? ' (at least)' : ''}</dt><dd className="font-mono">{formatQAR(it.aboveControl)}</dd></div>
-          ) : it.complete ? (
-            <div className={`${row} font-semibold text-emerald-700`}><dt>Budget not allocated to items</dt><dd className="font-mono">{formatQAR(it.notAllocated)}</dd></div>
-          ) : (
-            <div className={`${row} text-slate-600`}><dt>Difference against control budget</dt><dd className="text-xs">Shown when every item has a finalized amount</dd></div>
-          )
-        )}
       </dl>
-      {!it.complete && (
-        <p className="mt-3 text-xs text-amber-900 bg-amber-50/70 border border-amber-200 rounded-lg px-3 py-2">
-          {it.missingCount} active item{it.missingCount === 1 ? ' has' : 's have'} no finalized amount yet, so this is not the complete project cost.
-        </p>
+      {(!it.complete || !it.controlBudgetConfirmed || miscCategoryNames.length > 0) && (
+        <ul className="mt-3 space-y-1.5">
+          {!it.complete && (
+            <li className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-sm text-amber-900">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
+              <span>{it.missingCount} active item{it.missingCount === 1 ? ' has' : 's have'} no finalized amount, so this is not the complete project cost.</span>
+            </li>
+          )}
+          {!it.controlBudgetConfirmed && (
+            <li className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-sm text-amber-900">
+              <AlertTriangle className="w-4 h-4 shrink-0" aria-hidden="true" />
+              <span>The control budget is not confirmed, so no difference is shown.</span>
+              {canConfirmBudget && <button type="button" onClick={onSettings} className="font-semibold text-sky-700 hover:text-sky-900">Open settings</button>}
+            </li>
+          )}
+          {miscCategoryNames.length > 0 && (
+            <li className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-sm text-amber-900">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" />
+              <span>Check category {miscCategoryNames.map((n) => `“${n}”`).join(', ')}: its items are in the subtotal and the miscellaneous allowance is added separately.</span>
+            </li>
+          )}
+        </ul>
       )}
-      {miscCategoryNames.length > 0 && (
-        <p className="mt-2 text-xs text-amber-900 bg-amber-50/70 border border-amber-200 rounded-lg px-3 py-2">
-          Check category {miscCategoryNames.map((n) => `“${n}”`).join(', ')}: its items are counted in the subtotal and the miscellaneous allowance is added separately.
-        </p>
-      )}
-      <p className="mt-3 text-xs text-slate-500">The control budget is the approved spending limit. It does not change when item amounts or the miscellaneous percentage change.</p>
+      <p className="mt-3 text-xs text-slate-500">The control budget is the approved spending limit and does not change when item amounts or the miscellaneous percentage change.</p>
     </div>
   );
 }

@@ -81,17 +81,19 @@ describe('info popover', () => {
 describe('financial overview', () => {
   it('shows four prominent amounts and the overdue subset only when something is overdue', () => {
     const t = text(renderToStaticMarkup(<FinanceOverview projectId="p1" fin={fin()} canConfirmBudget onSettings={noop} />));
-    for (const s of ['Confirmed control budget', 'QAR 1,800,000.00', 'Actual paid', 'QAR 765,000.00', 'Scheduled unpaid', 'QAR 143,500.00', 'Budget remaining', 'QAR 1,035,000.00', '42.5%', 'QAR 15,000.00 of the scheduled unpaid amount is overdue']) expect(t).toContain(s);
+    for (const s of ['Budget planning', 'Project budget', 'QAR 1,800,000.00', 'Payment tracking', 'Actual paid', 'QAR 765,000.00', 'Scheduled unpaid', 'QAR 143,500.00', 'Budget left after payments', 'QAR 1,035,000.00', 'Budget less recorded payments; unpaid commitments are not deducted.', '42.5%', 'QAR 765,000.00 of QAR 1,800,000.00', 'QAR 15,000.00 of the scheduled unpaid amount is overdue']) expect(t).toContain(s);
     expect(text(renderToStaticMarkup(<FinanceOverview projectId="p1" fin={fin({ overdue: 0, overdueCount: 0 })} canConfirmBudget onSettings={noop} />))).not.toContain('overdue');
   });
   it('definitions live in info popovers, not paragraphs under the cards', () => {
     const h = renderToStaticMarkup(<FinanceOverview projectId="p1" fin={fin()} canConfirmBudget onSettings={noop} />);
-    for (const l of ['About confirmed control budget', 'About actual paid', 'About scheduled unpaid', 'About budget remaining after payments']) expect(h).toContain(`aria-label="${l}"`);
+    for (const l of ['About project budget', 'About actual paid', 'About scheduled unpaid', 'About budget left after payments']) expect(h).toContain(`aria-label="${l}"`);
+    // a non-negative balance uses the normal text colour, not green
+    expect(h).not.toMatch(/text-emerald-700[^"]*">QAR 1,035,000/);
     expect(text(h)).not.toContain('It is not uncommitted or available cash');
   });
   it('over budget: explicit amount and percentage', () => {
     const t = text(renderToStaticMarkup(<FinanceOverview projectId="p1" fin={fin({ paid: 1912400 })} canConfirmBudget onSettings={noop} />));
-    expect(t).toContain('Payments exceed the budget by QAR 112,400.00');
+    expect(t).toContain('Overspent: payments exceed the budget by QAR 112,400.00');
     expect(t).toContain('106.2%');
   });
   it('missing vs unconfirmed vs zero budgets stay distinct; one action for an unconfirmed budget', () => {
@@ -243,10 +245,11 @@ describe('itemized budget display', () => {
     const f = financeOverview({ controlBudget: 1000000, controlBudgetConfirmed: true, paid: 0, pending: 0, overdue: 0, overdueCount: 0, itemized: it5() });
     const h = renderToStaticMarkup(<FinanceOverview projectId="p1" fin={f} canConfirmBudget onSettings={noop} />);
     const t = text(h);
-    for (const s of ['Confirmed control budget', 'Itemized total incl. misc.', 'QAR 1,263,945.15', 'Actual paid', 'Scheduled unpaid', 'Budget remaining after payments', 'QAR 1,000,000.00']) expect(t).toContain(s);
-    expect(t).toContain('Itemized costs exceed the control budget by QAR 263,945.15');
-    expect(t).toContain('nothing has been paid yet');
-    expect(t).not.toContain('Payments exceed');
+    for (const s of ['Project budget', 'Total incl. miscellaneous', 'QAR 1,263,945.15', 'Actual paid', 'Scheduled unpaid', 'Budget left after payments', 'QAR 1,000,000.00']) expect(t).toContain(s);
+    expect(t).toContain('Itemized costs are QAR 263,945.15 above budget (26.39%).');
+    expect(t).toMatch(/Includes miscellaneous allowance\. Actual paid: QAR 0\.00 ?\./);
+    expect(t).toContain('Review budget');
+    expect(t).not.toContain('Overspent');
     expect(h).toContain('href="#/budget/p1"');
   });
   it('dashboard: below budget shows "Budget not allocated to items" only when complete', () => {
@@ -259,13 +262,28 @@ describe('itemized budget display', () => {
   });
   it('budget page summary: subtotal + misc = grand total, control budget and the difference', () => {
     const s = { itemized: it5(), misc: { percentage: 10 }, byKind: [{ kind: 'fixed', subtotal: 572500, itemCount: 3, missingCount: 0 }, { kind: 'finishing', subtotal: 628586.5, itemCount: 16, missingCount: 0 }, { kind: 'other', subtotal: 0, itemCount: 0, missingCount: 0 }] } as any;
-    const t = text(renderToStaticMarkup(<BudgetSummary s={s} onSettings={noop} canEditPct miscCategoryNames={[]} />));
-    expect(t).toMatch(/Fixed costs QAR 572,500\.00 Finishing items QAR 628,586\.50 Finalized items subtotal QAR 1,201,086\.50 \+ Miscellaneous allowance .*QAR 62,858\.65 Grand total including miscellaneous QAR 1,263,945\.15 Confirmed control budget QAR 1,000,000\.00 Above control budget QAR 263,945\.15/);
+    const t = text(renderToStaticMarkup(<BudgetSummary s={s} onSettings={noop} canConfirmBudget miscCategoryNames={[]} />));
+    expect(t).toMatch(/Fixed costs QAR 572,500\.00 Finishing items QAR 628,586\.50 Finalized items subtotal QAR 1,201,086\.50 Miscellaneous allowance .*QAR 62,858\.65 Grand total including miscellaneous QAR 1,263,945\.15 Confirmed control budget QAR 1,000,000\.00 Above budget QAR 263,945\.15/);
+    expect(t).not.toContain('Edit %'); // the single Edit % control lives in the miscellaneous card
     expect(t).not.toContain('Other items');
-    const inc = text(renderToStaticMarkup(<BudgetSummary s={{ ...s, itemized: it5({ missingCount: 2 }) }} onSettings={noop} canEditPct={false} miscCategoryNames={['Misc works']} />));
+    const inc = text(renderToStaticMarkup(<BudgetSummary s={{ ...s, itemized: it5({ missingCount: 2 }) }} onSettings={noop} canConfirmBudget={false} miscCategoryNames={['Misc works']} />));
     expect(inc).toContain('Incomplete');
-    expect(inc).toContain('2 active items have no finalized amount yet');
-    expect(inc).toContain('Above control budget (at least)');
+    expect(inc).toContain('2 active items have no finalized amount');
+    expect(inc).toContain('Above budget (at least)');
     expect(inc).toContain('“Misc works”');
+  });
+});
+
+describe('budget warning edge cases', () => {
+  const fo = (it: ReturnType<typeof itemizedBudget>, paid = 0) => financeOverview({ controlBudget: it.controlBudget, controlBudgetConfirmed: it.controlBudgetConfirmed, paid, pending: 0, overdue: 0, overdueCount: 0, itemized: it });
+  it('incomplete totals qualify the overrun; a zero budget shows no percentage; no warning when not above budget', () => {
+    const inc = text(renderToStaticMarkup(<FinanceOverview projectId="p1" fin={fo(itemizedBudget({ finalizedSubtotal: 1100000, missingCount: 2, miscAllowance: 0, controlBudget: 1000000, controlBudgetConfirmed: true }))} canConfirmBudget onSettings={noop} />));
+    expect(inc).toContain('Itemized costs are at least QAR 100,000.00 above budget (10.00%).');
+    expect(inc).toContain('2 items have no amount yet.');
+    const zero = text(renderToStaticMarkup(<FinanceOverview projectId="p1" fin={fo(itemizedBudget({ finalizedSubtotal: 500, missingCount: 0, miscAllowance: 0, controlBudget: 0, controlBudgetConfirmed: true }))} canConfirmBudget onSettings={noop} />));
+    expect(zero).toContain('Itemized costs are QAR 500.00 above budget.');
+    expect(zero).not.toMatch(/above budget \(/);
+    const ok = text(renderToStaticMarkup(<FinanceOverview projectId="p1" fin={fo(itemizedBudget({ finalizedSubtotal: 900000, missingCount: 0, miscAllowance: 0, controlBudget: 1000000, controlBudgetConfirmed: true }))} canConfirmBudget onSettings={noop} />));
+    expect(ok).not.toContain('Itemized costs are');
   });
 });
