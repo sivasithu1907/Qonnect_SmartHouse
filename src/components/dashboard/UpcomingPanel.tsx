@@ -1,20 +1,20 @@
 import React, { useState } from 'react';
-import { CalendarDays, ClipboardCheck, Hammer, MapPin, Search, Truck } from 'lucide-react';
+import { CalendarDays, ClipboardCheck, Hammer, MapPin, PackageCheck, Search, Truck } from 'lucide-react';
 import { formatDate } from '../../lib/format';
-import { UPCOMING_TABS, upcomingMatches, upcomingWindowEnd, type UpcomingItem, type UpcomingTab } from '../../lib/dashboard';
-import { Card, inputCls, StatusBadge } from '../ui';
+import { groupByDate, UPCOMING_TABS, upcomingDateLine, upcomingMatches, upcomingWindowEnd, type UpcomingItem, type UpcomingTab } from '../../lib/dashboard';
+import { inputCls, StatusBadge } from '../ui';
+import { Section } from './Section';
 
-const KIND: Record<UpcomingItem['kind'], { label: string; Icon: React.FC<{ className?: string }> }> = {
-  material: { label: 'Material delivery', Icon: Truck },
-  task: { label: 'Task', Icon: Hammer },
-  consultant_visit: { label: 'Consultant visit', Icon: ClipboardCheck },
-  site_visit: { label: 'Site visit', Icon: MapPin },
-};
-const TAB_LABEL: Record<UpcomingTab, string> = { all: 'All', materials: 'Materials', tasks: 'Tasks', visits: 'Visits & Inspections' };
-const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const dow = (iso: string) => DOW[new Date(`${iso}T00:00:00Z`).getUTCDay()];
+const TAB_LABEL: Record<UpcomingTab, string> = { all: 'All', materials: 'Materials', tasks: 'Tasks', visits: 'Visits & inspections' };
 
-/** Deliveries, tasks and visits dated today through today + 13 (application time zone). Overdue items live in Needs attention. */
+function kindOf(i: UpcomingItem): { label: string; Icon: React.FC<{ className?: string }> } {
+  if (i.kind === 'material') return i.dateKind === 'required' ? { label: 'Material needed on site', Icon: PackageCheck } : { label: 'Material delivery', Icon: Truck };
+  if (i.kind === 'task') return { label: 'Task', Icon: Hammer };
+  if (i.kind === 'consultant_visit') return { label: 'Consultant visit', Icon: ClipboardCheck };
+  return { label: 'Site visit', Icon: MapPin };
+}
+
+/** Deliveries, tasks and visits dated today through today + 13 (application time zone), grouped by date. Overdue items live in Needs attention. */
 export function UpcomingPanel({ projectId, items, today, days, can }: { projectId: string; items: UpcomingItem[]; today: string; days: number; can: (c: string) => boolean }) {
   const [tab, setTab] = useState<UpcomingTab>('all');
   const [q, setQ] = useState('');
@@ -26,16 +26,16 @@ export function UpcomingPanel({ projectId, items, today, days, can }: { projectI
     visits: can('consultant.read') ? ['Open Consultant Visits', `#/consultant/${projectId}`] : can('site.read') ? ['Open Site Visits', `#/site/${projectId}`] : null,
   };
   const link = viewAll[tab];
-  let lastDate = '';
   return (
-    <Card title={<span className="flex items-center gap-2"><CalendarDays className="w-4 h-4 text-sky-600" />Next 14 days</span>}
-      subtitle={`${formatDate(today)} – ${formatDate(upcomingWindowEnd(today, days))} · overdue items are listed under Needs attention`}>
-      <div className="flex flex-wrap items-center gap-2 mb-3">
+    <Section id="up-title" title="Next 14 days" icon={<CalendarDays className="w-4 h-4 text-sky-600" />}
+      meta={`${formatDate(today)} – ${formatDate(upcomingWindowEnd(today, days))}`}
+      actions={link && <a href={link[1]} className="text-sm font-semibold text-sky-700 hover:text-sky-900 no-underline">{link[0]} →</a>}>
+      <div className="flex flex-wrap items-center gap-2">
         <div role="tablist" aria-label="Activity type" className="flex flex-wrap gap-1 bg-slate-100 border border-slate-200 rounded-xl p-1">
           {UPCOMING_TABS.map((t) => (
             <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold min-h-9 ${tab === t ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'}`}>
-              {TAB_LABEL[t]}<span className="ml-1.5 font-mono text-[11px] text-slate-500">{items.filter((i) => upcomingMatches(i, t, '')).length}</span>
+              className={`px-3 py-1.5 rounded-lg text-sm font-semibold min-h-9 ${tab === t ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'}`}>
+              {TAB_LABEL[t]}<span className="ml-1.5 font-mono text-xs text-slate-500">{items.filter((i) => upcomingMatches(i, t, '')).length}</span>
             </button>
           ))}
         </div>
@@ -46,40 +46,42 @@ export function UpcomingPanel({ projectId, items, today, days, can }: { projectI
         </label>
       </div>
       {shown.length === 0 ? (
-        <div className="text-center py-8 px-4 border border-dashed border-slate-200 rounded-xl bg-slate-50/60">
-          <p className="text-sm font-semibold text-slate-700">{items.length === 0 ? 'Nothing scheduled in the next 14 days' : 'No activity matches'}</p>
-          <p className="text-xs text-slate-500 mt-1">{items.length === 0 ? 'Deliveries, tasks and visits with dates in this period appear here.' : 'Try another tab or clear the search.'}</p>
-        </div>
+        <p className="mt-4 text-sm text-slate-500">{items.length === 0 ? 'Nothing is dated in the next 14 days. Overdue items appear under Needs attention.' : 'No activity matches. Try another tab or clear the search.'}</p>
       ) : (
-        <ul className="divide-y divide-slate-100" data-testid="upcoming-list">
-          {shown.map((i) => {
-            const first = i.date !== lastDate;
-            lastDate = i.date;
-            const k = KIND[i.kind];
-            return (
-              <li key={i.key} className="grid grid-cols-1 sm:grid-cols-[5.5rem_minmax(0,1fr)_auto] gap-x-4 gap-y-1.5 py-3 items-start">
-                <div className={`text-xs ${first ? '' : 'sm:invisible'}`}>
-                  <span className="block text-sm font-bold text-slate-900">{formatDate(i.date)}</span>
-                  <span className="text-slate-500">{dow(i.date)}{i.date === today ? ' · today' : ''}</span>
-                </div>
-                <div className="min-w-0">
-                  <span className="flex items-center gap-1.5 text-[11px] font-bold text-slate-600"><k.Icon className="w-3.5 h-3.5 text-sky-600" />{k.label}{i.context ? <span className="font-semibold text-slate-500">· {i.context}</span> : null}</span>
-                  <p className="text-sm font-semibold text-slate-900 break-words" title={i.title}>{i.title}</p>
-                  <p className="text-xs text-slate-500 mt-0.5 break-words">{i.dateLabel}{i.who ? ` · ${i.who}` : ''}</p>
-                </div>
-                <div className="flex sm:flex-col items-center sm:items-end justify-between gap-2">
-                  <StatusBadge status={i.status} />
-                  <a href={i.href} aria-label={`Open record: ${i.title}`} className="inline-flex min-h-9 items-center px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-sky-700 hover:bg-sky-50 no-underline">Open record</a>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+        <div className="mt-3" data-testid="upcoming-list">
+          {groupByDate(shown).map((g) => (
+            <section key={g.date} aria-label={g.heading} className="mt-2 first:mt-0">
+              <h3 className="py-1.5 text-sm font-semibold text-slate-700 border-b border-slate-100">
+                {g.heading}{g.date === today && <span className="ml-2 text-xs font-semibold text-sky-700">Today</span>}
+              </h3>
+              <ul className="divide-y divide-slate-100">
+                {g.items.map((i) => {
+                  const k = kindOf(i);
+                  const line = upcomingDateLine(i);
+                  const meta = (i.kind === 'task' ? ['Task', line.label, i.context, i.who] : [line.label, i.context, i.who]).filter(Boolean);
+                  return (
+                    <li key={i.key} className="grid grid-cols-[2rem_minmax(0,1fr)] sm:grid-cols-[2rem_minmax(0,1fr)_auto] gap-x-3 gap-y-2 py-3 items-start">
+                      <span className="w-8 h-8 rounded-lg bg-sky-50 text-sky-700 grid place-items-center" title={k.label}><k.Icon className="w-4 h-4" /><span className="sr-only">{k.label}</span></span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-900 break-words" title={i.title}>{i.title}</p>
+                        <p className="text-xs text-slate-500 mt-0.5 break-words">
+                          {meta.join(' · ')}
+                          {line.delivery && <span className="text-amber-800"> · {line.delivery}</span>}
+                          {i.kind === 'material' && i.requiredOnSite && i.dateKind !== 'required' && <span> · needed on site {formatDate(i.requiredOnSite)}</span>}
+                        </p>
+                      </div>
+                      <div className="col-start-2 sm:col-start-3 flex items-center gap-2 sm:justify-end">
+                        <StatusBadge status={i.status} />
+                        <a href={i.href} aria-label={`Open: ${i.title}`} className="inline-flex min-h-9 items-center px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-sm font-semibold text-sky-700 hover:bg-sky-50 no-underline">Open</a>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ))}
+        </div>
       )}
-      <div className="flex flex-wrap items-center justify-between gap-2 mt-3">
-        <span className="text-xs text-slate-500">{shown.length} of {items.length} shown, earliest first</span>
-        {link && <a href={link[1]} className="text-xs font-semibold text-sky-700 hover:text-sky-900 no-underline">{link[0]} →</a>}
-      </div>
-    </Card>
+    </Section>
   );
 }

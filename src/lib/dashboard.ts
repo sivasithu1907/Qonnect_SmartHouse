@@ -112,6 +112,8 @@ export function financeOverview(f: FinanceInput) {
 export interface UpcomingItem {
   key: string; kind: 'material' | 'task' | 'consultant_visit' | 'site_visit'; id: string; date: string; dateLabel: string;
   title: string; context: string; who: string; status: string; href: string;
+  /** materials only: which date field the date came from, and whether a delivery date is supplier-confirmed */
+  dateKind?: 'revised' | 'confirmed' | 'planned' | 'required'; deliveryStatus?: 'confirmed' | 'unconfirmed' | 'none'; requiredOnSite?: string | null;
 }
 export const UPCOMING_TABS = ['all', 'materials', 'tasks', 'visits'] as const;
 export type UpcomingTab = (typeof UPCOMING_TABS)[number];
@@ -140,4 +142,70 @@ export function checklistCounts(setup: Array<{ done: boolean }>, prereqs: Array<
   const total = setup.length + applicable.length;
   const done = setupDone + preDone;
   return { setupDone, setupTotal: setup.length, preDone, preApplicable: applicable.length, notApplicable: live.length - applicable.length, done, total, remaining: total - done, pct: pctLabel(done, total) };
+}
+
+// ---------------------------------------------------------------- presentation helpers (no stored data is changed)
+
+/** Short display titles for the standard timeline template; the stored phase name is never changed. */
+const PHASE_SHORT_LABELS: Record<string, string> = {
+  'Project setup, scope review, budget confirmation, and contractor/consultant responsibilities': 'Project setup',
+  'Design coordination, measurements, drawings, specifications, quotations, and approvals': 'Design & approvals',
+  'Permits and authority/utility coordination as applicable to the approved project documents': 'Permits & utilities',
+  'Site survey, mobilization, access, storage, safety, and site preparation': 'Site preparation',
+  'Groundworks, foundations, substructure, and underground services': 'Groundworks & foundations',
+  'Structural frame, slabs, blockwork, roof, and building envelope': 'Structure & envelope',
+  'Waterproofing and insulation, with required inspection and water/flood tests before covering': 'Waterproofing & insulation',
+  'MEP first-fix: electrical conduits, plumbing, drainage, AC routes, and low-current conduits/cabling': 'MEP first-fix',
+  'MEP inspections and testing before closing walls or ceilings': 'MEP inspections & testing',
+  'Plastering, wall preparation, screed, and substrate readiness': 'Plaster & screed',
+  'Windows, doors, external sealing, and weather-tightness checks': 'Windows & external doors',
+  'Floor/wall tiles, marble, granite, and other floor finishes': 'Tiling & floor finishes',
+  'Gypsum/false ceiling framing, above-ceiling inspection, boards, and access panels': 'Gypsum ceilings',
+  'Painting and wall finishes': 'Painting & wall finishes',
+  'Electrical/ELV fixtures, lighting, switches, sockets, cameras, intercom, and network equipment': 'Electrical & ELV fixtures',
+  'Plumbing and sanitary fixtures, water tanks/pumps, connections, and pressure/operational tests': 'Plumbing & sanitary fixtures',
+  'Air-conditioning equipment, final connections, controls, and commissioning': 'Air-conditioning',
+  'Doors, joinery, kitchen cabinets/countertops, and equipment': 'Joinery & kitchen',
+  'Staircase, handrails, external works, landscape, and irrigation': 'Stairs & external works',
+  'Integrated testing, defects/snags, rectification, final consultant inspection, document handover, and owner acceptance': 'Testing & handover',
+};
+/** Template phases get their short label; other names are shortened at the first comma / colon or a word boundary. */
+export function phaseDisplayName(name: string, max = 34): string {
+  const known = PHASE_SHORT_LABELS[name.trim()];
+  if (known) return known;
+  const head = name.split(/[,:;]/)[0].trim();
+  if (head.length <= max) return head;
+  const cut = head.slice(0, max);
+  return `${cut.slice(0, Math.max(cut.lastIndexOf(' '), 12)).trim()}…`;
+}
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** "10 Oct 2026 · Saturday" for a date-only value (no time-zone shift). */
+export function dateHeading(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()} · ${WEEKDAYS[d.getUTCDay()]}`;
+}
+export function groupByDate<T extends { date: string }>(items: T[]): Array<{ date: string; heading: string; items: T[] }> {
+  const out: Array<{ date: string; heading: string; items: T[] }> = [];
+  for (const i of items) {
+    const last = out[out.length - 1];
+    if (last && last.date === i.date) last.items.push(i);
+    else out.push({ date: i.date, heading: dateHeading(i.date), items: [i] });
+  }
+  return out;
+}
+
+/**
+ * The date line for an upcoming item. A required-on-site date is never presented as a delivery:
+ * it is labelled "Required on site", and the delivery state is shown separately.
+ */
+export function upcomingDateLine(i: UpcomingItem): { label: string; delivery: string | null } {
+  if (i.kind !== 'material') return { label: i.dateLabel, delivery: null };
+  const delivery = i.deliveryStatus === 'confirmed' ? null
+    : i.deliveryStatus === 'unconfirmed' ? 'Not supplier-confirmed'
+    : 'Delivery date not entered';
+  // required-on-site is only used when no revised / confirmed / planned delivery date exists
+  if (i.dateKind === 'required') return { label: 'Required on site', delivery: 'Delivery date not entered' };
+  return { label: i.dateLabel, delivery: i.dateKind === 'confirmed' ? null : delivery };
 }

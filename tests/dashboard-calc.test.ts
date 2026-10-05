@@ -112,3 +112,30 @@ describe('upcoming tabs and search', () => {
     expect(items.filter((x) => upcomingMatches(x, 'tasks', 'tiles'))).toEqual([]);
   });
 });
+
+describe('phase display names', () => {
+  it('uses short labels for template phases, shortens other names, and never changes the stored name', async () => {
+    const { phaseDisplayName } = await import('../src/lib/dashboard');
+    expect(phaseDisplayName('Project setup, scope review, budget confirmation, and contractor/consultant responsibilities')).toBe('Project setup');
+    expect(phaseDisplayName('Integrated testing, defects/snags, rectification, final consultant inspection, document handover, and owner acceptance')).toBe('Testing & handover');
+    expect(phaseDisplayName('Landscaping, irrigation')).toBe('Landscaping');
+    expect(phaseDisplayName('Short name')).toBe('Short name');
+    expect(phaseDisplayName('An unusually long custom phase name without any commas at all here').endsWith('…')).toBe(true);
+  });
+});
+
+describe('date headings and material date lines', () => {
+  it('formats date-only headings without time-zone shifts and groups consecutive dates', async () => {
+    const { dateHeading, groupByDate } = await import('../src/lib/dashboard');
+    expect(dateHeading('2026-10-10')).toBe('10 Oct 2026 · Saturday');
+    expect(groupByDate([{ date: '2026-10-10' }, { date: '2026-10-10' }, { date: '2026-10-11' }]).map((g) => g.items.length)).toEqual([2, 1]);
+  });
+  it('labels required-on-site separately from delivery and shows the delivery state', async () => {
+    const { upcomingDateLine } = await import('../src/lib/dashboard');
+    const base = { key: 'k', kind: 'material' as const, id: '1', date: '2026-10-10', title: 't', context: '', who: '', status: 'Ordered', href: '#' };
+    expect(upcomingDateLine({ ...base, dateKind: 'required', dateLabel: 'Required on site', deliveryStatus: 'none' })).toEqual({ label: 'Required on site', delivery: 'Delivery date not entered' });
+    expect(upcomingDateLine({ ...base, dateKind: 'planned', dateLabel: 'Planned delivery', deliveryStatus: 'unconfirmed' })).toEqual({ label: 'Planned delivery', delivery: 'Not supplier-confirmed' });
+    expect(upcomingDateLine({ ...base, dateKind: 'confirmed', dateLabel: 'Supplier-confirmed delivery', deliveryStatus: 'confirmed' })).toEqual({ label: 'Supplier-confirmed delivery', delivery: null });
+    expect(upcomingDateLine({ ...base, kind: 'task', dateLabel: 'Planned start' })).toEqual({ label: 'Planned start', delivery: null });
+  });
+});

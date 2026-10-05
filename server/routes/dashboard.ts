@@ -48,7 +48,9 @@ function upcomingActivity(pid: string, today: string, materials: any[], tasks: a
     const e = expectedDeliveryDate(m);
     if (!e || !inWindow(e.date)) continue;
     const resp = SUPPLY_RESPONSIBILITY_LABELS[m.supply_responsibility as keyof typeof SUPPLY_RESPONSIBILITY_LABELS] ?? '';
-    out.push({ key: `material-${m.id}`, kind: 'material', id: m.id, date: e.date, dateLabel: e.label, title: m.description, context: m.category,
+    out.push({ key: `material-${m.id}`, kind: 'material', id: m.id, date: e.date, dateLabel: e.label, dateKind: e.kind,
+      deliveryStatus: m.confirmed_delivery_date ? 'confirmed' : m.planned_delivery_date || m.revised_delivery_date ? 'unconfirmed' : 'none',
+      requiredOnSite: m.required_on_site_date ?? null, title: m.description, context: m.category,
       who: [resp, m.assigned_contractor_name || m.vendor].filter(Boolean).join(' · '), status: m.status, href: `#/materials/${pid}/${m.id}` });
   }
   for (const t of tasks) {

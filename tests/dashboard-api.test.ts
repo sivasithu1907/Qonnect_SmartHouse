@@ -81,7 +81,8 @@ describe('next 14 days', () => {
     expect(d.upcoming.find((i: any) => i.key === `task-${tasks[2].id}`)).toMatchObject({ date: addDaysISO(today, 5), dateLabel: 'Planned finish' });
     expect(d.upcoming.find((i: any) => i.key === `site-${sv.id}`)).toMatchObject({ date: lastDay, kind: 'site_visit', href: `#/site/${ctx.projects.p1}/${sv.id}` });
     expect(d.upcoming.find((i: any) => i.key === `consultant-${cv.id}`)).toMatchObject({ who: 'Supervision consultant', href: `#/consultant/${ctx.projects.p1}/${cv.id}` });
-    expect(d.upcoming.find((i: any) => i.key === `material-${m1.id}`)).toMatchObject({ date: today, dateLabel: 'Supplier-confirmed delivery', href: `#/materials/${ctx.projects.p1}/${m1.id}` });
+    expect(d.upcoming.find((i: any) => i.key === `material-${m1.id}`)).toMatchObject({ date: today, dateLabel: 'Supplier-confirmed delivery', dateKind: 'confirmed', deliveryStatus: 'confirmed', href: `#/materials/${ctx.projects.p1}/${m1.id}` });
+    expect(d.upcoming.find((i: any) => i.key === `material-${m2.id}`)).toMatchObject({ dateKind: 'planned', deliveryStatus: 'unconfirmed' });
     const dates = d.upcoming.map((i: any) => i.date);
     expect([...dates].sort()).toEqual(dates); // chronological
     expect(d.upcoming.every((i: any) => i.href.includes(ctx.projects.p1))).toBe(true);

@@ -1,76 +1,83 @@
 import React, { useState } from 'react';
-import { AlertTriangle, CheckCircle2, Circle, CircleAlert } from 'lucide-react';
-import type { AttentionItem, SetupItem } from '../lib/projectHealth';
-import type { Section } from '../lib/types';
-import { Badge, Card } from './ui';
+import { CheckCircle2, Circle, CircleAlert } from 'lucide-react';
+import { attentionSummary, type AttentionItem, type SetupItem } from '../lib/projectHealth';
+import type { Section as AppSection } from '../lib/types';
+import { Section } from './dashboard/Section';
 
-/** One setup step; completion comes only from saved data. */
-export function SetupRow({ i, onSettings, onNavigate }: { i: SetupItem; onSettings: () => void; onNavigate: (s: Section) => void }) {
+/** One setup step; completion comes only from saved data. Partial progress is shown as counts, e.g. "22/40 assigned". */
+export function SetupRow({ i, onSettings, onNavigate }: { i: SetupItem; onSettings: () => void; onNavigate: (s: AppSection) => void }) {
   const act = () => { if (i.action.kind === 'settings') onSettings(); else if (i.action.kind === 'section') onNavigate(i.action.section); };
+  const btn = 'shrink-0 min-h-9 inline-flex items-center px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-sm font-semibold text-sky-700 hover:bg-sky-50 no-underline';
   return (
-    <li className="flex items-start gap-3 py-3">
+    <li className="grid grid-cols-[1.5rem_minmax(0,1fr)] sm:grid-cols-[1.5rem_minmax(0,1fr)_10rem_auto] gap-x-3 gap-y-2 py-3 items-center">
       {i.done
-        ? <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" aria-hidden="true" />
-        : <Circle className="w-5 h-5 text-slate-300 shrink-0" aria-hidden="true" />}
-      <div className="min-w-0 flex-1">
-        <div className={`text-sm font-semibold ${i.done ? 'text-slate-500' : 'text-slate-900'}`}>
-          {i.label}<span className="sr-only">{i.done ? ' — complete' : ' — not complete'}</span>
-          {i.progress && <span className="ml-2 text-xs font-medium text-slate-500">{i.progress}</span>}
-        </div>
-        <div className="text-xs text-slate-600 mt-0.5">{i.detail}</div>
+        ? <CheckCircle2 className="w-5 h-5 text-emerald-600" aria-hidden="true" />
+        : <Circle className="w-5 h-5 text-slate-300" aria-hidden="true" />}
+      <div className="min-w-0">
+        <p className={`text-sm font-semibold ${i.done ? 'text-slate-500' : 'text-slate-900'}`}>{i.label}<span className="sr-only">{i.done ? ' — complete' : ' — not complete'}</span></p>
+        <p className="text-sm text-slate-500 mt-0.5">{i.detail}</p>
       </div>
-      {!i.done && (i.action.kind === 'href' ? (
-        <a href={i.action.href} className="shrink-0 min-h-9 inline-flex items-center px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-sky-700 hover:bg-sky-50 no-underline">
-          {i.actionLabel}
-        </a>
-      ) : (
-        <button type="button" onClick={act} className="shrink-0 min-h-9 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-sky-700 hover:bg-sky-50">
-          {i.actionLabel}
-        </button>
-      ))}
+      <div className="col-start-2 sm:col-start-3">
+        {i.count && (
+          <>
+            <p className="text-sm text-slate-700"><b className="font-mono">{i.count.done}/{i.count.total}</b> {i.count.unit}</p>
+            <div className="mt-1 h-1.5 rounded-full bg-slate-200 overflow-hidden" aria-hidden="true"><div className={`h-full rounded-full ${i.done ? 'bg-emerald-500' : 'bg-sky-600'}`} style={{ width: `${i.count.total ? (i.count.done / i.count.total) * 100 : 0}%` }} /></div>
+          </>
+        )}
+      </div>
+      <div className="col-start-2 sm:col-start-4 sm:justify-self-end">
+        {!i.done && (i.action.kind === 'href'
+          ? <a href={i.action.href} className={btn}>{i.actionLabel}</a>
+          : <button type="button" onClick={act} className={btn}>{i.actionLabel}</button>)}
+      </div>
     </li>
   );
 }
 
 export const ATTENTION_LIMIT = 6;
 
-/** Actionable items with severity spelled out; "Showing X of Y" when only part of the list is visible. */
+const UNIT_LABEL: Record<AttentionItem['unit'], [string, string]> = { payment: ['payment', 'payments'], material: ['material', 'materials'], task: ['task', 'tasks'], visit: ['visit', 'visits'] };
+
+/** Issue groups with the number of records each one covers; "Showing X of Y" when only part of the list is visible. Content-sized. */
 export function NeedsAttention({ items }: { items: AttentionItem[] }) {
   const [all, setAll] = useState(false);
   const shown = all ? items : items.slice(0, ATTENTION_LIMIT);
-  const critical = items.filter((i) => i.severity === 'critical').length;
   return (
-    <Card title={<span className="flex items-center gap-2"><CircleAlert className="w-4 h-4 text-amber-600" />Needs attention</span>}
-      actions={items.length > 0 && <>{critical > 0 && <Badge tone="rose">{critical} critical</Badge>}{items.length - critical > 0 && <Badge tone="amber">{items.length - critical} warning</Badge>}</>}>
+    <Section id="at-title" title="Needs attention" icon={<CircleAlert className="w-4 h-4 text-amber-600" />} meta={items.length ? attentionSummary(items) : undefined}>
       {items.length === 0 ? (
-        <p className="flex items-center gap-2 text-sm text-slate-600"><CheckCircle2 className="w-4 h-4 text-emerald-600" />Nothing overdue, blocked or waiting on a decision right now.</p>
+        <p className="flex items-center gap-2 text-sm text-slate-600"><CheckCircle2 className="w-4 h-4 text-emerald-600" />Nothing overdue, blocked or waiting on a decision.</p>
       ) : (
         <>
-          <ul className="space-y-2.5" data-testid="attention-list">
+          <ul className="divide-y divide-slate-100" data-testid="attention-list">
             {shown.map((i) => (
-              <li key={i.key} className={`rounded-lg border border-slate-200 border-l-4 bg-white p-3 ${i.severity === 'critical' ? 'border-l-rose-500' : 'border-l-amber-400'}`}>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge tone={i.severity === 'critical' ? 'rose' : 'amber'}>
-                    {i.severity === 'critical' ? <AlertTriangle className="w-3 h-3" aria-hidden="true" /> : null}{i.severity === 'critical' ? 'Critical' : 'Warning'}
-                  </Badge>
-                  <span className="text-xs font-bold text-slate-700">{i.tag}</span>
+              <li key={i.key} className="py-3 first:pt-0">
+                <div className="flex items-start gap-2.5">
+                  <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${i.severity === 'critical' ? 'bg-rose-500' : 'bg-amber-400'}`} aria-hidden="true" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-slate-500">
+                      <span className={i.severity === 'critical' ? 'text-rose-700' : 'text-amber-800'}>{i.severity === 'critical' ? 'Critical' : 'Warning'}</span> · {i.tag}
+                    </p>
+                    <p className="text-sm font-semibold text-slate-900 break-words mt-0.5">
+                      {i.title}
+                      {i.count > 1 && <span className="ml-2 align-middle text-xs font-semibold text-slate-600 bg-slate-100 rounded px-1.5 py-0.5">{i.count} {UNIT_LABEL[i.unit][1]}</span>}
+                    </p>
+                    <p className="text-sm text-slate-600 mt-0.5 break-words">{i.detail}{i.who ? <span className="text-slate-500"> · {i.who}</span> : null}</p>
+                    <a href={i.href} className="mt-1.5 inline-flex min-h-9 items-center text-sm font-semibold text-sky-700 hover:text-sky-900 no-underline">{i.actionLabel} →</a>
+                  </div>
                 </div>
-                <p className="mt-1 text-sm font-semibold text-slate-900 break-words">{i.title}</p>
-                <p className="text-xs text-slate-600 mt-0.5 break-words">{i.detail}{i.who ? <span className="text-slate-500"> · {i.who}</span> : null}</p>
-                <a href={i.href} className="mt-2 inline-flex min-h-9 items-center px-3 py-1.5 rounded-lg bg-sky-600 text-white text-xs font-semibold hover:bg-sky-700 no-underline">{i.actionLabel}</a>
               </li>
             ))}
           </ul>
-          <div className="flex flex-wrap items-center justify-between gap-2 mt-3">
-            <span className="text-xs text-slate-500">Showing {shown.length} of {items.length}</span>
-            {items.length > ATTENTION_LIMIT && (
-              <button type="button" aria-expanded={all} onClick={() => setAll(!all)} className="text-xs font-semibold text-sky-700 hover:text-sky-900 min-h-9 px-2 rounded">
+          {items.length > ATTENTION_LIMIT && (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
+              <span className="text-sm text-slate-500">Showing {shown.length} of {items.length}</span>
+              <button type="button" aria-expanded={all} onClick={() => setAll(!all)} className="text-sm font-semibold text-sky-700 hover:text-sky-900 min-h-9 px-2 rounded">
                 {all ? 'Show fewer' : `Show all ${items.length}`}
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </>
       )}
-    </Card>
+    </Section>
   );
 }

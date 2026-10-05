@@ -1,6 +1,6 @@
 // Setup checklist, "Needs attention" and project search: derived only from saved data.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildAttention, buildSetupChecklist, type DashboardData } from '../src/lib/projectHealth';
+import { attentionSummary, buildAttention, buildSetupChecklist, type DashboardData } from '../src/lib/projectHealth';
 import { filterProjects } from '../src/components/Header';
 import { nextMilestone, type DashTask } from '../src/lib/dashboard';
 import { capabilitiesFor } from '../server/permissions';
@@ -81,7 +81,8 @@ describe('needs attention', () => {
     expect(a[3]).toMatchObject({ tag: 'Approaching milestone', href: '#/timeline/p1/t2' });
     expect(a[4]).toMatchObject({ tag: 'Milestone waits for a blocked task', href: '#/timeline/p1/t1' });
     expect(a[5]).toMatchObject({ tag: 'Consultant report not attached', href: '#/consultant/p1/v1', actionLabel: 'Open visit' });
-    expect(a[6].href).toBe('#/materials/p1/filter:awaiting');
+    expect(a[6]).toMatchObject({ href: '#/materials/p1/filter:awaiting', count: 2, unit: 'material', actionLabel: 'Show these 2 lines' });
+    expect(attentionSummary(a)).toBe('7 issues · 1 payment, 3 materials, 3 tasks, 1 visit');
     expect(a.every((i) => i.tag.length > 0 && i.actionLabel.length > 0)).toBe(true);
   });
 

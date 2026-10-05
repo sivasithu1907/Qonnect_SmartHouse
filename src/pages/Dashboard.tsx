@@ -13,8 +13,8 @@ import { UpcomingPanel } from '../components/dashboard/UpcomingPanel';
 import { ProjectChecklist } from '../components/dashboard/ProjectChecklist';
 
 /**
- * Project dashboard: overview and phases → financial overview → next 14 days | needs attention →
- * setup and prerequisites checklist. All figures come from saved records of the selected project.
+ * Project dashboard: compact overview → financial overview → phase tracker → next 14 days | needs attention →
+ * project setup and prerequisites & documents. All figures come from saved records of the selected project.
  */
 export function Dashboard({ project, onNavigate, onSettings }: { project: Project; onNavigate: (s: Section) => void; onSettings: () => void }) {
   const { can } = useSession();
@@ -42,12 +42,13 @@ export function Dashboard({ project, onNavigate, onSettings }: { project: Projec
   const phase = view.phases.find((p) => p.id === phaseId) ?? null;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <ProjectOverview project={project} tasks={view.tasks} phases={view.phases} milestone={view.milestone} upcomingDays={days}
-        onOpenPhase={setPhaseId} onSettings={onSettings} canSettings={can('links.edit') || can('projects.manage')} />
+        onOpenPhase={setPhaseId} onSettings={onSettings} canSettings={can('links.edit') || can('projects.manage')} canTimeline={can('timeline.read')}
+        budgetUnconfirmed={!view.fin || view.fin.confirmed ? null : view.fin.budget === null ? 'missing' : 'unconfirmed'} canConfirmBudget={can('projects.manage') && !project.archived_at} />
+      <FinanceOverview projectId={project.id} fin={view.fin} canConfirmBudget={can('projects.manage') && !project.archived_at} onSettings={onSettings} />
       {can('timeline.read') && <PhaseTracker phases={view.phases} onOpenPhase={setPhaseId} />}
-      <FinanceOverview projectId={project.id} fin={view.fin} />
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)] gap-5 items-start">
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)] gap-4 items-start">
         <UpcomingPanel projectId={project.id} items={d.upcoming ?? []} today={today} days={days} can={can} />
         <NeedsAttention items={view.attention} />
       </div>
