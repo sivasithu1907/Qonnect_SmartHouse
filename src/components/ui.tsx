@@ -346,7 +346,10 @@ export function SearchSelect({ id, value, onChange, options, disabled, nullable,
     const vw = document.documentElement.clientWidth;
     const width = Math.min(Math.max(r.width, 240), vw - 16);
     const left = Math.min(Math.max(8, r.left), vw - width - 8);
-    setPos(up ? { left, width, bottom: window.innerHeight - r.top + 4, maxList, up } : { left, width, top: r.bottom + 4, maxList, up });
+    const next = up ? { left, width, bottom: window.innerHeight - r.top + 4, maxList, up } : { left, width, top: r.bottom + 4, maxList, up };
+    // re-render only when the position really changes (a re-render must never disturb the list)
+    setPos((prev) => (prev && prev.left === next.left && prev.width === next.width && prev.top === next.top && prev.bottom === next.bottom
+      && prev.maxList === next.maxList && prev.up === next.up ? prev : next));
   }, []);
 
   useEffect(() => {
@@ -357,36 +360,52 @@ export function SearchSelect({ id, value, onChange, options, disabled, nullable,
       if (!popRef.current?.contains(t) && !btnRef.current?.contains(t)) setOpen(false);
     };
     const re = () => place();
+    // the list's own scrolling must not trigger a reposition; only page / dialog scrolling moves the field
+    const onScroll = (e: Event) => { if (!popRef.current?.contains(e.target as Node)) place(); };
     document.addEventListener('pointerdown', onDown);
     window.addEventListener('resize', re);
-    window.addEventListener('scroll', re, true);
+    window.addEventListener('scroll', onScroll, true);
     window.visualViewport?.addEventListener('resize', re);
     window.visualViewport?.addEventListener('scroll', re);
     return () => {
       document.removeEventListener('pointerdown', onDown);
       window.removeEventListener('resize', re);
-      window.removeEventListener('scroll', re, true);
+      window.removeEventListener('scroll', onScroll, true);
       window.visualViewport?.removeEventListener('resize', re);
       window.visualViewport?.removeEventListener('scroll', re);
     };
   }, [open, place]);
+  // Reveal the active option only after opening, a new search or a key press — never in response to
+  // manual scrolling, hovering or a reposition, so wheel / touch / scrollbar scrolling is left alone.
+  const reveal = useRef(false);
   // start on the current selection, or the first option
   useEffect(() => {
     if (!open) return;
     const i = list.findIndex((o) => o.value === value);
+    reveal.current = true;
     setActive(!q && i >= 0 ? i : 0);
   }, [q, open]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (open) listRef.current?.querySelector<HTMLElement>(`#${uid}-${active}`)?.scrollIntoView?.({ block: 'nearest' });
+    if (!open || !pos || !reveal.current) return;
+    const ul = listRef.current;
+    const li = ul?.querySelector<HTMLElement>(`#${uid}-${active}`);
+    if (!ul || !li) return;
+    reveal.current = false;
+    // scroll only the list (not the dialog or page) just enough to show the option
+    const top = li.offsetTop - ul.offsetTop;
+    const head = li.previousElementSibling?.getAttribute('role') === 'presentation' ? (li.previousElementSibling as HTMLElement).offsetHeight : 0;
+    if (top - head < ul.scrollTop) ul.scrollTop = top - head;
+    else if (top + li.offsetHeight > ul.scrollTop + ul.clientHeight) ul.scrollTop = top + li.offsetHeight - ul.clientHeight;
   }, [active, open, uid, pos]);
 
   const close = (focusButton = true) => { setOpen(false); setQ(''); if (focusButton) btnRef.current?.focus(); };
   const choose = (v: string) => { onChange(v); close(); };
   const onKey = (e: React.KeyboardEvent) => {
-    if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => Math.min(a + 1, list.length - 1)); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
-    else if (e.key === 'Home' && list.length) { e.preventDefault(); setActive(0); }
-    else if (e.key === 'End' && list.length) { e.preventDefault(); setActive(list.length - 1); }
+    const move = (i: number) => { if (i !== active) { reveal.current = true; setActive(i); } };
+    if (e.key === 'ArrowDown') { e.preventDefault(); move(Math.min(active + 1, list.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); move(Math.max(active - 1, 0)); }
+    else if (e.key === 'Home' && list.length) { e.preventDefault(); move(0); }
+    else if (e.key === 'End' && list.length) { e.preventDefault(); move(list.length - 1); }
     else if (e.key === 'Enter') { e.preventDefault(); if (list[active]) choose(list[active].value); }
     else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
     else if (e.key === 'Tab') { e.preventDefault(); close(); }
