@@ -7,6 +7,7 @@ import type { FocusProps, BudgetResponse, ContractsResponse, PaymentMilestone, P
 import { formatDate, formatQAR, todayLocalISO } from '../lib/format';
 import { PAYEE_TYPE_LABELS, PAYEE_TYPES, PAYMENT_METHOD_LABELS, PAYMENT_METHODS } from '../../shared/constants';
 import { Attachments } from '../components/Attachments';
+import { budgetItemOptions } from '../lib/budgetOrder';
 import { Badge, Button, Card, EmptyState, inputCls, Kpi, LinkButton, Modal, Notice, PageHeader, RecordForm, Spinner, StatusBadge, Table, Td, Th, useUi, type FieldSpec } from '../components/ui';
 
 type Edit = { kind: 'milestone'; row: PaymentMilestone | null } | { kind: 'tx'; milestone: PaymentMilestone; row: PaymentTransaction | null };
@@ -15,8 +16,8 @@ export function Payments({ project, focusId, onFocusHandled }: { project: Projec
   const base = `/api/projects/${project.id}/payments`;
   const [showArchived, setShowArchived] = useState(false);
   const { data, error, reload } = useApi<PaymentsResponse>(`${base}${showArchived ? '?includeArchived=1' : ''}`);
-  const { data: budget } = useApi<BudgetResponse>(`/api/projects/${project.id}/budget`);
   const { can } = useSession();
+  const { data: budget } = useApi<BudgetResponse>(can('budget.read') ? `/api/projects/${project.id}/budget` : null);
   const { toast, confirm } = useUi();
   const [edit, setEdit] = useState<Edit | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
@@ -36,9 +37,9 @@ export function Payments({ project, focusId, onFocusHandled }: { project: Projec
   if (error) return <Notice tone="rose">{error}</Notice>;
   if (!data) return <Spinner />;
   const t = data.totals;
-  const budgetOptions = (budget?.items ?? []).filter((i) => !i.archived_at).map((i) => ({
-    value: i.id, label: `${budget!.categories.find((c) => c.id === i.category_id)?.name ?? ''} · ${i.name}`,
-  }));
+  // budget-page order; the record's current link stays listed (marked archived) if it was archived since
+  const editingMilestone = edit?.kind === 'milestone' ? edit.row : null;
+  const budgetOptions = budgetItemOptions(budget?.categories ?? [], budget?.items ?? [], editingMilestone?.budget_item_id);
 
   const contractOptions = (contracts?.contracts ?? []).map((k) => ({ value: k.id, label: `${k.title} — ${k.company_name}`, group: k.category_name }));
 
@@ -46,7 +47,9 @@ export function Payments({ project, focusId, onFocusHandled }: { project: Projec
     { name: 'payee_type', label: 'Payee type', type: 'select', options: PAYEE_TYPES.map((p) => ({ value: p, label: PAYEE_TYPE_LABELS[p] })), required: true },
     { name: 'payee_name', label: 'Payee name', required: true },
     { name: 'cost_category', label: 'Cost category' },
-    { name: 'budget_item_id', label: 'Related master budget item', type: 'select', nullable: true, options: budgetOptions },
+    { name: 'budget_item_id', label: 'Related master budget item', type: 'searchselect', nullable: true, options: budgetOptions, wide: true,
+      noneLabel: 'No linked budget item', noMatchLabel: 'No matching items', searchPlaceholder: 'Search items or categories…',
+      fallbackLabel: editingMilestone?.budget_item_name ?? undefined, help: 'Optional. Linking does not change any amount or mark anything paid.' },
     { name: 'contract_id', label: 'Contract', type: 'searchselect', nullable: true, options: contractOptions, hidden: !contracts, help: 'Optional. Contracts from this project only. Linking does not change any amount.' },
     { name: 'po_contract_ref', label: 'PO / contract reference' },
     { name: 'invoice_ref', label: 'Invoice reference' },

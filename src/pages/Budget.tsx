@@ -8,8 +8,9 @@ import { formatQAR } from '../lib/format';
 import { sumMoney } from '../../shared/calc';
 import { ManageCategories } from '../components/ManageCategories';
 import { Badge, Button, Card, EmptyState, LinkButton, Modal, NeedsConfirmation, Notice, PageHeader, RecordForm, Spinner, Table, Tabs, Td, Th, useUi, type FieldSpec } from '../components/ui';
+import { BUDGET_KIND_TITLE, sortBudgetCategories, sortBudgetItems } from '../lib/budgetOrder';
 
-const KIND_TITLE: Record<string, string> = { fixed: 'Fixed costs', finishing: 'Finishing categories', other: 'Other categories' };
+const KIND_TITLE = BUDGET_KIND_TITLE;
 const KIND_LABEL: Record<string, string> = { fixed: 'Fixed cost', finishing: 'Finishing', other: 'Other' };
 
 export function Budget({ project, onSettings }: { project: Project; onSettings: () => void }) {
@@ -23,11 +24,11 @@ export function Budget({ project, onSettings }: { project: Project; onSettings: 
   const admin = can('budget.write') && !project.archived_at;
   const manageCats = can('categories.manage') && !project.archived_at;
 
-  const cats = useMemo(() => (data?.categories ?? []).filter((c) => showArchived || !c.archived_at), [data, showArchived]);
+  const cats = useMemo(() => sortBudgetCategories((data?.categories ?? []).filter((c) => showArchived || !c.archived_at)), [data, showArchived]);
   if (error) return <Notice tone="rose">{error}</Notice>;
   if (!data) return <Spinner />;
 
-  const itemsOf = (cid: string) => data.items.filter((i) => i.category_id === cid && (showArchived || !i.archived_at));
+  const itemsOf = (cid: string) => sortBudgetItems(data.items.filter((i) => i.category_id === cid && (showArchived || !i.archived_at)));
   const misc = data.summary.misc;
   const s = data.summary;
   // a budget category that looks like a miscellaneous line would be counted on top of the allowance
@@ -38,9 +39,8 @@ export function Budget({ project, onSettings }: { project: Project; onSettings: 
     try { await post(url); toast(msg); await reload(); } catch (e) { toast((e as Error).message, 'error'); }
   };
 
-  const categoryOptions = (currentId?: string) => [...data.categories]
+  const categoryOptions = (currentId?: string) => sortBudgetCategories(data.categories)
     .filter((c) => !c.archived_at || c.id === currentId)
-    .sort((a, b) => a.sort_order - b.sort_order)
     .map((c) => ({ value: c.id, label: c.archived_at ? `${c.name} (archived)` : c.name, group: KIND_TITLE[c.kind] }));
 
   const itemFields = (row: BudgetItem | null): FieldSpec[] => [

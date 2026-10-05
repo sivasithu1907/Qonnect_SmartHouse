@@ -11,6 +11,7 @@ import { Attachments } from '../components/Attachments';
 import { ManageCategories } from '../components/ManageCategories';
 import { useWideLayout } from '../components/materials/MaterialCategorySection';
 import { Badge, Button, Card, EmptyState, inputCls, LinkButton, Modal, Notice, PageHeader, RecordForm, Spinner, StatusBadge, Table, Td, Th, useUi, type FieldSpec } from '../components/ui';
+import { budgetItemOptions } from '../lib/budgetOrder';
 
 export const NO_AUTO_CHANGES_NOTE = 'Saving a contract or entering its value never changes approved budget amounts, creates payment milestones or marks anything paid.';
 
@@ -44,9 +45,8 @@ export function Contracts({ project, focusId, onFocusHandled }: { project: Proje
   const categoryOptions = (current?: string) => categories
     .filter((c) => !c.archived_at || c.id === current)
     .map((c) => ({ value: c.id, label: c.archived_at ? `${c.name} (archived)` : c.name }));
-  const budgetOptions = (budget?.items ?? []).filter((i) => !i.archived_at).map((i) => ({
-    value: i.id, label: i.name, group: budget!.categories.find((c) => c.id === i.category_id)?.name ?? '',
-  }));
+  // budget-page order; a contract's current link stays listed (marked archived) if it was archived since
+  const budgetOptions = (keepId?: string | null) => budgetItemOptions(budget?.categories ?? [], budget?.items ?? [], keepId);
 
   const contractFields = (row: Contract | ContractDetail | null): FieldSpec[] => [
     { name: 'title', label: 'Contract title', required: true, wide: true },
@@ -56,7 +56,9 @@ export function Contracts({ project, focusId, onFocusHandled }: { project: Proje
     { name: 'signed_date', label: 'Signed date', type: 'date' },
     { name: 'contract_value', label: 'Contract value (QAR)', type: 'money', hidden: !finance, help: 'Optional. For reference only — it does not change the budget or payments.' },
     { name: 'status', label: 'Status', type: 'select', required: true, options: CONTRACT_STATUSES.map((s) => ({ value: s, label: s })) },
-    { name: 'budget_item_id', label: 'Related budget item', type: 'searchselect', nullable: true, options: budgetOptions, hidden: !budget, help: 'Optional link to a budget item in this project.' },
+    { name: 'budget_item_id', label: 'Related budget item', type: 'searchselect', nullable: true, options: budgetOptions(row?.budget_item_id), hidden: !budget,
+      noneLabel: 'No linked budget item', noMatchLabel: 'No matching items', searchPlaceholder: 'Search items or categories…',
+      fallbackLabel: row?.budget_item_name ?? undefined, help: 'Optional link to a budget item in this project.' },
     { name: 'drive_url', label: 'Google Drive folder link', type: 'url', placeholder: 'https://drive.google.com/…', wide: true },
     { name: 'notes', label: 'Notes', type: 'textarea' },
   ];

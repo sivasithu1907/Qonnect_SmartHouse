@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ExternalLink, Info, Loader2, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { AlertTriangle, Check, CheckCircle2, ChevronDown, ExternalLink, Info, Loader2, X } from 'lucide-react';
 import { fromLocalInput, toLocalInput } from '../lib/format';
 
 // ------------------------------------------------------------------ primitives
@@ -239,7 +240,15 @@ export function UiProvider({ children }: { children: React.ReactNode }) {
 }
 
 // ------------------------------------------------------------------ generic record form
-export interface Option { value: string; label: string; group?: string }
+export interface Option {
+  value: string; label: string; group?: string;
+  /** secondary context shown after the label when selected (e.g. the category) */
+  hint?: string;
+  /** extra searchable text that is not displayed */
+  keywords?: string;
+  /** an existing link to a record that is no longer offered for new selections */
+  archived?: boolean;
+}
 export type FieldType = 'searchselect' | 'password' | 'text' | 'textarea' | 'number' | 'money' | 'date' | 'datetime' | 'select' | 'checkbox' | 'url' | 'multiselect';
 export interface FieldSpec {
   name: string;
@@ -253,6 +262,11 @@ export interface FieldSpec {
   disabled?: boolean;
   nullable?: boolean; // select: '' → null
   hidden?: boolean;
+  /** searchselect: label of the empty choice, the no-results text and the label for a current value that isn't offered */
+  noneLabel?: string;
+  noMatchLabel?: string;
+  fallbackLabel?: string;
+  searchPlaceholder?: string;
 }
 
 type Values = Record<string, any>;
@@ -288,68 +302,144 @@ export function OptionList({ options }: { options: Option[] }) {
 }
 
 /**
- * Searchable single-select. The list opens inline (inside scrolling dialogs it is never
- * clipped); type to filter by label or group, arrow keys + Enter to choose, Escape to close.
+ * Searchable single-select (combobox + listbox).
+ * - Type to filter by label, group heading, hint or keywords; group headings are not selectable.
+ * - Arrow keys / Home / End move, Enter selects, Escape closes (without closing the dialog), Tab closes.
+ * - The list floats above the page, is bounded to the visible viewport (including when a phone keyboard
+ *   is open) and opens upward when there is more room above.
+ * - A current value that is not in `options` (e.g. no longer offered) is still shown via `fallbackLabel`.
  */
-export function SearchSelect({ id, value, onChange, options, disabled, nullable, noneLabel = '— None —', searchPlaceholder = 'Type to search…' }: {
+export function SearchSelect({ id, value, onChange, options, disabled, nullable, noneLabel = '— None —', searchPlaceholder = 'Type to search…', noMatchLabel = 'No matches', fallbackLabel, ariaLabel }: {
   id?: string; value: string; onChange: (v: string) => void; options: Option[]; disabled?: boolean; nullable?: boolean; noneLabel?: string; searchPlaceholder?: string;
+  noMatchLabel?: string; fallbackLabel?: string; ariaLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const [active, setActive] = useState(0);
-  const boxRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; width: number; top?: number; bottom?: number; maxList: number; up: boolean } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const uid = useRef(`ss-${Math.random().toString(36).slice(2, 9)}`).current;
   const selected = options.find((o) => o.value === value);
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
   const matches = options.filter((o) => {
-    const hay = `${o.label} ${o.group ?? ''}`.toLowerCase();
+    const hay = `${o.label} ${o.group ?? ''} ${o.hint ?? ''} ${o.keywords ?? ''}`.toLowerCase();
     return words.every((w) => hay.includes(w));
   });
   const list: Option[] = nullable && !q ? [{ value: '', label: noneLabel }, ...matches] : matches;
+
+  const place = useCallback(() => {
+    const b = btnRef.current;
+    if (!b) return;
+    const r = b.getBoundingClientRect();
+    const vv = window.visualViewport;
+    const vTop = vv ? vv.offsetTop : 0;
+    const vBottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
+    const margin = 8;
+    const searchH = 44;
+    const below = vBottom - r.bottom - margin;
+    const above = r.top - vTop - margin;
+    const up = below < 240 && above > below;
+    const room = (up ? above : below) - searchH - 6;
+    const maxList = Math.max(96, Math.min(320, room));
+    const vw = document.documentElement.clientWidth;
+    const width = Math.min(Math.max(r.width, 240), vw - 16);
+    const left = Math.min(Math.max(8, r.left), vw - width - 8);
+    setPos(up ? { left, width, bottom: window.innerHeight - r.top + 4, maxList, up } : { left, width, top: r.bottom + 4, maxList, up });
+  }, []);
+
   useEffect(() => {
     if (!open) return;
-    const h = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
-  }, [open]);
-  useEffect(() => { setActive(0); }, [q, open]);
-  const choose = (v: string) => { onChange(v); setOpen(false); setQ(''); };
+    place();
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (!popRef.current?.contains(t) && !btnRef.current?.contains(t)) setOpen(false);
+    };
+    const re = () => place();
+    document.addEventListener('pointerdown', onDown);
+    window.addEventListener('resize', re);
+    window.addEventListener('scroll', re, true);
+    window.visualViewport?.addEventListener('resize', re);
+    window.visualViewport?.addEventListener('scroll', re);
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('resize', re);
+      window.removeEventListener('scroll', re, true);
+      window.visualViewport?.removeEventListener('resize', re);
+      window.visualViewport?.removeEventListener('scroll', re);
+    };
+  }, [open, place]);
+  // start on the current selection, or the first option
+  useEffect(() => {
+    if (!open) return;
+    const i = list.findIndex((o) => o.value === value);
+    setActive(!q && i >= 0 ? i : 0);
+  }, [q, open]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (open) listRef.current?.querySelector<HTMLElement>(`#${uid}-${active}`)?.scrollIntoView?.({ block: 'nearest' });
+  }, [active, open, uid, pos]);
+
+  const close = (focusButton = true) => { setOpen(false); setQ(''); if (focusButton) btnRef.current?.focus(); };
+  const choose = (v: string) => { onChange(v); close(); };
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => Math.min(a + 1, list.length - 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
+    else if (e.key === 'Home' && list.length) { e.preventDefault(); setActive(0); }
+    else if (e.key === 'End' && list.length) { e.preventDefault(); setActive(list.length - 1); }
     else if (e.key === 'Enter') { e.preventDefault(); if (list[active]) choose(list[active].value); }
-    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setOpen(false); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+    else if (e.key === 'Tab') { e.preventDefault(); close(); }
   };
+  const onButtonKey = (e: React.KeyboardEvent) => {
+    if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); setOpen(true); }
+  };
+
+  const shown = selected ?? (value && fallbackLabel ? { value, label: fallbackLabel } as Option : undefined);
   let lastGroup: string | undefined;
+  const popup = open && pos && (
+    <div ref={popRef} className="fixed z-[70] flex flex-col border border-slate-200 rounded-lg bg-white shadow-lg"
+      style={{ left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom, flexDirection: pos.up ? 'column-reverse' : 'column' }}>
+      <input autoFocus className={`${inputCls} !border-0 ${pos.up ? '!border-t !rounded-t-none' : '!border-b !rounded-b-none'} !ring-0`} placeholder={searchPlaceholder}
+        value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} aria-label="Search options"
+        role="combobox" aria-expanded="true" aria-controls={`${uid}-list`} aria-autocomplete="list"
+        aria-activedescendant={list[active] ? `${uid}-${active}` : undefined} />
+      <ul ref={listRef} id={`${uid}-list`} role="listbox" aria-label={ariaLabel} className="overflow-y-auto overscroll-contain py-1 text-sm" style={{ maxHeight: pos.maxList }}>
+        {list.length === 0 && <li role="presentation" className="px-3 py-3 text-sm text-slate-500">{noMatchLabel}{q && <> for “{q}”</>}</li>}
+        {list.map((o, i) => {
+          const header = o.group && o.group !== lastGroup ? o.group : null;
+          lastGroup = o.group;
+          const isSel = o.value === value;
+          return (
+            <React.Fragment key={o.value || '__none'}>
+              {header && <li role="presentation" className="px-3 pt-2.5 pb-1 text-[10px] font-bold uppercase tracking-wide text-slate-500 select-none">{header}</li>}
+              <li id={`${uid}-${i}`} role="option" aria-selected={isSel}
+                onMouseDown={(e) => e.preventDefault()} onClick={() => choose(o.value)} onMouseMove={() => active !== i && setActive(i)}
+                className={`flex items-center gap-2 py-2 sm:py-1.5 cursor-pointer ${o.group ? 'pl-5 pr-3' : 'px-3'} ${i === active ? 'bg-sky-50' : ''} ${isSel ? 'text-sky-800 font-semibold' : o.value === '' ? 'text-slate-500' : 'text-slate-800'}`}>
+                <span className="min-w-0 flex-1 truncate">{o.label}</span>
+                {o.archived && <span className="shrink-0 rounded bg-amber-50 border border-amber-200 px-1.5 text-[10px] font-semibold text-amber-800">Archived</span>}
+                <Check className={`w-4 h-4 shrink-0 text-sky-600 ${isSel ? '' : 'invisible'}`} aria-hidden="true" />
+              </li>
+            </React.Fragment>
+          );
+        })}
+      </ul>
+    </div>
+  );
   return (
-    <div ref={boxRef}>
-      <button id={id} type="button" disabled={disabled} onClick={() => setOpen(!open)} aria-haspopup="listbox" aria-expanded={open}
+    <div>
+      <button ref={btnRef} id={id} type="button" disabled={disabled} onClick={() => (open ? close(false) : setOpen(true))} onKeyDown={onButtonKey}
+        aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? `${uid}-list` : undefined}
         className={`${inputCls} text-left flex items-center justify-between gap-2`}>
-        <span className={`truncate ${selected ? '' : 'text-slate-400'}`}>{selected ? selected.label : noneLabel}</span>
-        <span className="text-slate-400 text-xs shrink-0">▾</span>
+        <span className={`min-w-0 truncate ${shown && shown.value ? '' : 'text-slate-400'}`}>
+          {shown && shown.value ? <>{shown.label}{shown.hint && <span className="text-slate-400 font-normal"> · {shown.hint}</span>}</> : noneLabel}
+        </span>
+        <span className="flex items-center gap-1.5 shrink-0">
+          {shown?.archived && <span className="rounded bg-amber-50 border border-amber-200 px-1.5 text-[10px] font-semibold text-amber-800">Archived</span>}
+          <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
+        </span>
       </button>
-      {open && (
-        <div className="mt-1 border border-slate-200 rounded-lg bg-white shadow-sm">
-          <input autoFocus className={`${inputCls} !border-0 !border-b !rounded-b-none !ring-0`} placeholder={searchPlaceholder}
-            value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} aria-label="Search options" />
-          <ul role="listbox" className="max-h-56 overflow-y-auto py-1 text-sm">
-            {list.length === 0 && <li className="px-3 py-2 text-xs text-slate-500">No matches</li>}
-            {list.map((o, i) => {
-              const header = o.group && o.group !== lastGroup ? o.group : null;
-              lastGroup = o.group;
-              return (
-                <React.Fragment key={o.value || '__none'}>
-                  {header && <li className="px-3 pt-2 pb-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">{header}</li>}
-                  <li role="option" aria-selected={o.value === value}
-                    onMouseDown={(e) => { e.preventDefault(); choose(o.value); }} onMouseEnter={() => setActive(i)}
-                    className={`px-3 py-1.5 cursor-pointer ${i === active ? 'bg-sky-50 text-sky-900' : 'text-slate-800'} ${o.value === value ? 'font-semibold' : ''} ${o.value === '' ? 'text-slate-400' : ''}`}>
-                    {o.label}
-                  </li>
-                </React.Fragment>
-              );
-            })}
-          </ul>
-        </div>
-      )}
+      {popup && createPortal(popup, document.body)}
     </div>
   );
 }
@@ -422,7 +512,8 @@ export function RecordForm({ fields, initial, onSubmit, onCancel, submitLabel = 
                       <OptionList options={f.options ?? []} />
                     </select>
                   ) : t === 'searchselect' ? (
-                    <SearchSelect id={id} value={vals[f.name]} disabled={f.disabled} nullable={f.nullable} options={f.options ?? []} onChange={(v) => set(f.name, v)} />
+                    <SearchSelect id={id} value={vals[f.name]} disabled={f.disabled} nullable={f.nullable} options={f.options ?? []} onChange={(v) => set(f.name, v)}
+                      noneLabel={f.noneLabel} noMatchLabel={f.noMatchLabel} fallbackLabel={f.fallbackLabel} searchPlaceholder={f.searchPlaceholder} ariaLabel={f.label} />
                   ) : t === 'multiselect' ? (
                     <select id={id} multiple className={`${inputCls} h-32`} value={vals[f.name]} disabled={f.disabled}
                       onChange={(e) => set(f.name, Array.from(e.target.selectedOptions).map((o) => o.value))}>
