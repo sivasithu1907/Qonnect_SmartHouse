@@ -2,33 +2,27 @@ import React, { useState } from 'react';
 import { CheckCircle2, Circle, CircleAlert } from 'lucide-react';
 import { attentionSummary, type AttentionItem, type SetupItem } from '../lib/projectHealth';
 import type { Section as AppSection } from '../lib/types';
-import { Section } from './dashboard/Section';
+import { CHECKLIST_ACTION, CHECKLIST_ROW_GRID, ProgressBlock, Section } from './dashboard/Section';
 
-/** One setup step; completion comes only from saved data. Partial progress is shown as counts, e.g. "22/40 assigned". */
+/** One setup step on the shared checklist grid; completion comes only from saved data. Partial progress shows as "22/40 assigned". */
 export function SetupRow({ i, onSettings, onNavigate }: { i: SetupItem; onSettings: () => void; onNavigate: (s: AppSection) => void }) {
   const act = () => { if (i.action.kind === 'settings') onSettings(); else if (i.action.kind === 'section') onNavigate(i.action.section); };
-  const btn = 'shrink-0 min-h-9 inline-flex items-center px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-sm font-semibold text-sky-700 hover:bg-sky-50 no-underline';
   return (
-    <li className="grid grid-cols-[1.5rem_minmax(0,1fr)] sm:grid-cols-[1.5rem_minmax(0,1fr)_10rem_auto] gap-x-3 gap-y-2 py-3 items-center">
+    <li className={`${CHECKLIST_ROW_GRID} py-3`}>
       {i.done
         ? <CheckCircle2 className="w-5 h-5 text-emerald-600" aria-hidden="true" />
         : <Circle className="w-5 h-5 text-slate-300" aria-hidden="true" />}
       <div className="min-w-0">
-        <p className={`text-sm font-semibold ${i.done ? 'text-slate-500' : 'text-slate-900'}`}>{i.label}<span className="sr-only">{i.done ? ' — complete' : ' — not complete'}</span></p>
-        <p className="text-sm text-slate-500 mt-0.5">{i.detail}</p>
+        <p className={`text-sm font-semibold break-words ${i.done ? 'text-slate-500' : 'text-slate-900'}`}>{i.label}<span className="sr-only">{i.done ? ' — complete' : ' — not complete'}</span></p>
+        <p className="text-sm text-slate-500 mt-0.5 break-words">{i.detail}</p>
       </div>
-      <div className="col-start-2 sm:col-start-3">
-        {i.count && (
-          <>
-            <p className="text-sm text-slate-700"><b className="font-mono">{i.count.done}/{i.count.total}</b> {i.count.unit}</p>
-            <div className="mt-1 h-1.5 rounded-full bg-slate-200 overflow-hidden" aria-hidden="true"><div className={`h-full rounded-full ${i.done ? 'bg-emerald-500' : 'bg-sky-600'}`} style={{ width: `${i.count.total ? (i.count.done / i.count.total) * 100 : 0}%` }} /></div>
-          </>
-        )}
+      <div className={`col-start-2 md:col-start-3 ${i.count ? '' : 'hidden md:block'}`}>
+        {i.count && <ProgressBlock label={<><b className="font-mono">{i.count.done}/{i.count.total}</b> {i.count.unit}</>} done={i.count.done} total={i.count.total} tone={i.done ? 'emerald' : 'sky'} />}
       </div>
-      <div className="col-start-2 sm:col-start-4 sm:justify-self-end">
+      <div className="col-start-2 md:col-start-4">
         {!i.done && (i.action.kind === 'href'
-          ? <a href={i.action.href} className={btn}>{i.actionLabel}</a>
-          : <button type="button" onClick={act} className={btn}>{i.actionLabel}</button>)}
+          ? <a href={i.action.href} className={CHECKLIST_ACTION}>{i.actionLabel}</a>
+          : <button type="button" onClick={act} className={CHECKLIST_ACTION}>{i.actionLabel}</button>)}
       </div>
     </li>
   );

@@ -185,7 +185,7 @@ describe('checklist', () => {
   it('two separately collapsible sections; setup counts steps and shows partial progress per step', () => {
     const t = render('admin', [step('responsibilities', false, { done: 22, total: 40, unit: 'assigned' }), step('delivery_dates', false, { done: 4, total: 40, unit: 'entered' }), step('timeline', false, { done: 0, total: 47, unit: 'tasks scheduled' }), step('control_budget', true, null)]);
     expect(t).toContain('Project setup');
-    expect(t).toContain('1 of 4 setup steps complete');
+    expect(t).toContain('1 of 4 steps complete');
     expect(t).toContain('22/40 assigned');
     expect(t).toContain('4/40 entered');
     expect(t).toContain('0/47 tasks scheduled');
@@ -202,6 +202,24 @@ describe('checklist', () => {
     const t = text(renderToStaticMarkup(<ul><SetupRow i={step('responsibilities', false, { done: 22, total: 40, unit: 'assigned' })} onSettings={noop} onNavigate={noop} /></ul>));
     expect(t).toContain('22/40 assigned');
     expect(t).toContain('Open settings');
+  });
+  it('every setup row and the section header share the same fixed columns, bar size and action size', () => {
+    const rows = [step('responsibilities', false, { done: 22, total: 40, unit: 'assigned' }), step('control_budget', false, null), step('links', true, { done: 2, total: 2, unit: 'linked' })]
+      .map((i) => renderToStaticMarkup(<ul><SetupRow i={i} onSettings={noop} onNavigate={noop} /></ul>));
+    for (const h of rows) expect(h).toContain('md:grid-cols-[24px_minmax(0,1fr)_180px_140px]');
+    // the row without numeric progress keeps an (empty) progress cell so the action stays aligned
+    expect(rows[1]).toContain('md:col-start-3');
+    expect(rows[1]).toContain('md:col-start-4');
+    expect(rows[0]).toMatch(/max-w-\[180px\]/);
+    expect(rows[0]).toContain('h-1.5 w-full');
+    expect(rows[0]).toMatch(/h-9 w-full max-w-\[140px\]/);
+    const header = renderToStaticMarkup(
+      <SessionContext.Provider value={session('admin')}><UiProvider>
+        <ProjectChecklist project={project} setup={[step('control_budget', false, null)]} phases={[]} today="2026-10-15" onSettings={noop} onNavigate={noop} />
+      </UiProvider></SessionContext.Provider>,
+    );
+    expect(header).toContain('md:grid-cols-[minmax(0,1fr)_180px_140px]');
+    expect(text(header)).toContain('0 of 1 steps complete');
   });
 });
 

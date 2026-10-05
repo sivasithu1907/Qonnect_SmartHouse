@@ -12,6 +12,7 @@ import { Attachments } from '../Attachments';
 import { SetupRow } from '../ProjectHealth';
 import { InfoPopover } from '../InfoPopover';
 import { Badge, Button, inputCls, Modal, Notice, RecordForm, useUi, type FieldSpec } from '../ui';
+import { CHECKLIST_HEADER_GRID, ProgressBlock } from './Section';
 
 type Filter = 'all' | 'outstanding' | 'completed';
 type Tone = 'emerald' | 'sky' | 'amber' | 'slate';
@@ -43,23 +44,20 @@ function Collapsible({ id, title, summary, done, total, open, onToggle, actions,
 }) {
   return (
     <section aria-labelledby={`${id}-title`} className="bg-white rounded-xl border border-slate-200 shadow-2xs min-w-0">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4">
+      <div className={`${CHECKLIST_HEADER_GRID} px-5 py-4`}>
         <button type="button" onClick={onToggle} aria-expanded={open} aria-controls={`${id}-body`}
-          className="flex items-center gap-3 min-w-0 text-left rounded-lg -m-1 p-1 hover:bg-slate-50">
+          className="flex items-center gap-3 min-w-0 text-left rounded-lg -m-1 p-1 hover:bg-slate-50 justify-self-start">
           <span className="w-8 h-8 grid place-items-center rounded-lg border border-slate-200 bg-slate-50 text-slate-600 shrink-0">
             <ChevronDown className={`w-4 h-4 transition-transform ${open ? '' : '-rotate-90'}`} aria-hidden="true" />
           </span>
-          <span className="min-w-0">
-            <span id={`${id}-title`} className="block text-base font-semibold text-slate-900">{title}</span>
-            <span className="block text-sm text-slate-500">{summary}</span>
-          </span>
+          <span id={`${id}-title`} className="text-base font-semibold text-slate-900">{title}</span>
         </button>
-        {total > 0 && (
-          <div className="w-full sm:w-40 sm:ml-auto h-1.5 rounded-full bg-slate-200 overflow-hidden" role="progressbar" aria-label={`${title} progress`} aria-valuemin={0} aria-valuemax={total} aria-valuenow={done}>
-            <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${(done / total) * 100}%` }} />
-          </div>
-        )}
-        {actions && <div className={`flex items-center gap-2 ${total > 0 ? '' : 'sm:ml-auto'}`}>{actions}</div>}
+        <div className="pl-10 md:pl-0">
+          {total > 0
+            ? <ProgressBlock label={summary} done={done} total={total} tone="emerald" ariaLabel={`${title} progress`} />
+            : <p className="text-sm text-slate-500">{summary}</p>}
+        </div>
+        <div className="pl-10 md:pl-0">{actions}</div>
       </div>
       {open && <div id={`${id}-body`} className="border-t border-slate-100 px-5 pb-4">{children}</div>}
     </section>
@@ -143,7 +141,7 @@ export function ProjectChecklist({ project, setup, phases, today, onSettings, on
     <div className="grid grid-cols-1 gap-4">
       <Collapsible id="ck-setup" title="Project setup" open={setupOpen} onToggle={() => setSetupOpen(!setupOpen)}
         done={counts.setupDone} total={counts.setupTotal}
-        summary={counts.setupTotal ? `${counts.setupDone} of ${counts.setupTotal} setup steps complete` : 'No setup steps for your role'}>
+        summary={counts.setupTotal ? `${counts.setupDone} of ${counts.setupTotal} steps complete` : 'No setup steps for your role'}>
         <p className="pt-3 text-sm text-slate-500">Tracks administrative project data. It does not indicate construction readiness.</p>
         {setup.length === 0
           ? <p className="py-3 text-sm text-slate-500">Setup steps are shown to the people who can complete them.</p>
@@ -155,7 +153,7 @@ export function ProjectChecklist({ project, setup, phases, today, onSettings, on
         summary={!canRead ? 'Not available for your role'
           : !data ? 'Loading…'
           : active.length === 0 ? 'No items yet'
-          : `${counts.preDone} of ${counts.preApplicable} complete${counts.notApplicable ? ` · ${counts.notApplicable} not applicable` : ''}`}
+          : `${counts.preDone} of ${counts.preApplicable} complete${counts.notApplicable ? ` · ${counts.notApplicable} N/A` : ''}`}
         actions={canRead && active.length > 0 ? addBtn : null}>
         {!canRead ? <p className="py-3 text-sm text-slate-500">Prerequisites are visible to admins, project managers and viewers.</p>
           : error ? <div className="pt-3"><Notice tone="rose">{error}</Notice></div>
