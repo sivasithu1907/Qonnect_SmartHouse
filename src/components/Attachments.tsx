@@ -3,7 +3,7 @@ import { Download, Eye, FileText, Paperclip, Trash2, Upload } from 'lucide-react
 import { post, upload } from '../lib/api';
 import { useApi } from '../lib/hooks';
 import { formatBytes, formatDateTime } from '../lib/format';
-import { ATTACHMENT_KIND_LABELS, attachmentKindsFor, type AttachmentEntityType, type AttachmentKind } from '../../shared/constants';
+import { ATTACHMENT_KIND_LABELS, attachmentKindsFor, PREVIEWABLE_MIME_TYPES, type AttachmentEntityType, type AttachmentKind } from '../../shared/constants';
 import { Button, inputCls, useUi } from './ui';
 
 interface Att { id: string; kind: string; original_name: string; mime_type: string; size_bytes: number; created_at: string; uploaded_by_name: string | null }
@@ -79,8 +79,8 @@ export function Attachments({ projectId, entityType, entityId, defaultKind, canU
                 </div>
               </div>
               <div className="flex items-center gap-1 shrink-0">
-                {/^(image\/(png|jpeg|webp)|application\/pdf)$/.test(a.mime_type) && (
-                  <a className="p-1 text-slate-500 hover:text-sky-700" href={`${base}/${a.id}/download?inline=1`} target="_blank" rel="noopener noreferrer" title="Preview" aria-label={`Preview ${a.original_name}`}><Eye className="w-3.5 h-3.5" /></a>
+                {PREVIEWABLE_MIME_TYPES.includes(a.mime_type) && (
+                  <a className="p-1 text-slate-500 hover:text-sky-700" href={`${base}/${a.id}/download?inline=1`} target="_blank" rel="noopener noreferrer" title="View in a new tab" aria-label={`View ${a.original_name}`}><Eye className="w-3.5 h-3.5" /></a>
                 )}
                 <a className="p-1 text-slate-500 hover:text-sky-700" href={`${base}/${a.id}/download`} title="Download" aria-label={`Download ${a.original_name}`}><Download className="w-3.5 h-3.5" /></a>
                 {canUpload && (canArchive ? canArchive(a) : true) && <button className="p-1 text-slate-400 hover:text-rose-600" onClick={() => archive(a)} title="Archive" aria-label={`Archive ${a.original_name}`}><Trash2 className="w-3.5 h-3.5" /></button>}

@@ -15,7 +15,7 @@ import { withTx } from '../db';
 import { audit } from '../audit';
 import { getOwned } from '../lib/crud';
 import { can, type Capability } from '../permissions';
-import { ATTACHMENT_ENTITY_TYPES, ATTACHMENT_KINDS, attachmentKindsFor, type AttachmentEntityType } from '../../shared/constants';
+import { ATTACHMENT_ENTITY_TYPES, ATTACHMENT_KINDS, attachmentKindsFor, PREVIEWABLE_MIME_TYPES, type AttachmentEntityType } from '../../shared/constants';
 import { canWriteConsultantVisit, canWriteSiteVisit } from './visits';
 
 interface Detected { mime: string; ext: string }
@@ -36,6 +36,42 @@ export function detectFileType(buf: Buffer, originalName: string): Detected | nu
     if (ext === '.xlsx') return { mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', ext: '.xlsx' };
   }
   return null;
+}
+
+/** Types the browser may show in a tab (View). Everything else is always sent as a download. */
+export const INLINE_TYPES = new Set(PREVIEWABLE_MIME_TYPES);
+
+/**
+ * Content-Security-Policy for a stored file response.
+ * - Downloads and image previews keep the fully sandboxed policy.
+ * - A PDF preview is not sandboxed: Chromium's built-in PDF viewer needs script and extension
+ *   permissions that a `sandbox` policy (without allow-scripts) removes, and Chromium can then refuse
+ *   the viewer with ERR_BLOCKED_BY_CLIENT. The PDF policy below still allows no page script, no
+ *   connections, no forms, no framing and no base-URL changes for the document itself.
+ */
+export function fileCsp(mime: string, inline: boolean): string {
+  if (inline && mime === 'application/pdf') {
+    return "default-src 'none'; object-src 'self'; img-src 'self' data: blob:; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+  }
+  return "sandbox; default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'";
+}
+
+/** RFC 6266 Content-Disposition with an ASCII fallback name and the exact UTF-8 name. */
+export function contentDisposition(type: 'inline' | 'attachment', name: string): string {
+  const fallback = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\%;]/g, '_').trim() || 'file';
+  const encoded = encodeURIComponent(name).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `${type}; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+}
+
+async function storedTypeMatches(full: string, mime: string, originalName: string): Promise<boolean> {
+  const fh = await fs.promises.open(full, 'r');
+  try {
+    const head = Buffer.alloc(16);
+    const { bytesRead } = await fh.read(head, 0, 16, 0);
+    return detectFileType(head.subarray(0, bytesRead), originalName)?.mime === mime;
+  } finally {
+    await fh.close();
+  }
 }
 
 const READ_CAP: Record<AttachmentEntityType, Capability> = {
@@ -173,14 +209,25 @@ export function attachmentRoutes(pool: pg.Pool, cfg: AppConfig) {
     if (a.archived_at) throw notFound();
     await assertEntityAccess(pool, req, a.entity_type as AttachmentEntityType, a.entity_id, 'read');
     const full = path.join(cfg.uploadDir, req.project!.id, path.basename(a.stored_name));
-    if (!fs.existsSync(full)) throw notFound('File is missing from storage');
-    const inline = req.query.inline === '1' && /^(image\/(png|jpeg|webp)|application\/pdf)$/.test(a.mime_type);
+    let stat: fs.Stats;
+    try {
+      stat = await fs.promises.stat(full);
+      if (!stat.isFile()) throw new Error('not a file');
+    } catch {
+      throw notFound('File is missing from storage');
+    }
+    // Preview only for previewable types, and only when the stored bytes still match the saved type.
+    const wantsInline = req.query.inline === '1' && INLINE_TYPES.has(a.mime_type);
+    const inline = wantsInline && (await storedTypeMatches(full, a.mime_type, a.original_name));
     res.setHeader('Content-Type', a.mime_type);
+    res.setHeader('Content-Length', String(stat.size));
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Cache-Control', 'private, no-store');
-    res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'; img-src 'self'; style-src 'unsafe-inline'");
-    res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(a.original_name)}`);
-    fs.createReadStream(full).pipe(res);
+    res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    res.setHeader('Content-Security-Policy', fileCsp(a.mime_type, inline));
+    res.setHeader('Content-Disposition', contentDisposition(inline ? 'inline' : 'attachment', a.original_name));
+    const stream = fs.createReadStream(full);
+    stream.on('error', () => res.destroy());
+    stream.pipe(res);
   });
 
   r.post('/:id/archive', async (req, res) => {

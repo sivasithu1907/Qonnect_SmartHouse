@@ -53,6 +53,13 @@ describe('service worker offline handling', () => {
     expect(await dispatch('https://smarthouse.example/api/projects')).toBeNull();
   });
 
+  it('never intercepts or caches private file View/Download requests, including tab navigations', async () => {
+    const { dispatch } = loadSw(offline);
+    const file = 'https://smarthouse.example/api/projects/p1/attachments/a1/download';
+    expect(await dispatch(file)).toBeNull();
+    expect(await dispatch(`${file}?inline=1`, 'navigate')).toBeNull();
+  });
+
   it('an uncached icon while offline fails as a normal network error instead of an empty response', async () => {
     const { dispatch } = loadSw(offline);
     const res = (await dispatch('https://smarthouse.example/icons/icon-192.png'))!;

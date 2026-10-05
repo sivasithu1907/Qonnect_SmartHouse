@@ -116,6 +116,10 @@ export function createApp(pool: pg.Pool, cfg: AppConfig, opts: AppOptions = {}) 
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
+    // A file preview opens in its own tab: show a readable page instead of raw JSON.
+    if (err instanceof HttpError && isFilePreviewNavigation(req)) {
+      return res.status(err.status).set(PREVIEW_ERROR_HEADERS).send(previewErrorPage(err.status));
+    }
     if (err instanceof HttpError) {
       return res.status(err.status).json({ error: err.message, details: err.details });
     }
@@ -130,4 +134,27 @@ export function createApp(pool: pg.Pool, cfg: AppConfig, opts: AppOptions = {}) 
   });
 
   return app;
+}
+
+const PREVIEW_PATH = /^\/api\/projects\/[^/]+\/attachments\/[^/]+\/download$/;
+function isFilePreviewNavigation(req: Request): boolean {
+  return req.method === 'GET' && req.query.inline === '1' && PREVIEW_PATH.test(req.path) && req.accepts(['json', 'html']) === 'html';
+}
+const PREVIEW_ERROR_HEADERS = {
+  'Content-Type': 'text/html; charset=utf-8',
+  'Cache-Control': 'no-store',
+  'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+};
+function previewErrorPage(status: number): string {
+  const [title, text] = status === 401
+    ? ['Sign in to view this file', 'Your session has ended. Sign in to Qonnect again, then open the file from its record.']
+    : status === 403
+      ? ['You can’t view this file', 'Your account doesn’t have access to this file.']
+      : ['File not available', 'This file may have been archived, or it is missing from storage. Return to Qonnect and check the record.'];
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title} — Qonnect</title>
+<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f8fafc;color:#0f172a;font-family:system-ui,sans-serif}
+main{max-width:420px;margin:24px;padding:28px;background:#fff;border:1px solid #e2e8f0;border-radius:16px;text-align:center}
+h1{font-size:18px;margin:0 0 6px}p{font-size:14px;color:#475569;line-height:1.5;margin:0 0 18px}
+a{display:inline-block;padding:10px 18px;border-radius:10px;background:#0284c7;color:#fff;font-weight:600;font-size:14px;text-decoration:none}</style></head>
+<body><main><h1>${title}</h1><p>${text}</p><a href="/">Open Qonnect</a></main></body></html>`;
 }

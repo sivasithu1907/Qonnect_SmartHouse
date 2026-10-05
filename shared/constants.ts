@@ -80,6 +80,8 @@ export const ATTACHMENT_KINDS = [
   'signed_contract', 'quotation', 'boq', 'amendment',
 ] as const;
 export type AttachmentKind = (typeof ATTACHMENT_KINDS)[number];
+/** File types that can be viewed in a browser tab (View). Other types are always downloaded. */
+export const PREVIEWABLE_MIME_TYPES: readonly string[] = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp'];
 export const ATTACHMENT_KIND_LABELS: Record<AttachmentKind, string> = {
   payment_slip: 'Payment slip / receipt',
   consultant_report: 'Consultant report',
