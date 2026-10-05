@@ -1,7 +1,7 @@
 // Pure calculations for the project dashboard. Everything is derived from saved records returned by
 // /api/projects/:id/dashboard and /prerequisites — nothing is estimated, and percentages are only
 // shown when there is a denominator.
-import { addDaysISO, fromCents, toCents } from '../../shared/calc';
+import { addDaysISO, fromCents, toCents, type ItemizedBudget } from '../../shared/calc';
 
 export interface DashTask {
   id: string; phase_id: string; name: string; status: string; planned_start: string | null; planned_end: string | null;
@@ -89,6 +89,8 @@ export function nextMilestone(tasks: DashTask[], today: string): Milestone {
 export interface FinanceInput {
   controlBudget: number | null; controlBudgetConfirmed: boolean; paid: number; pending: number; overdue: number; overdueCount: number;
   transactionCount?: number; unpaidCount?: number;
+  /** itemized totals from the shared budget calculation (same numbers as Master Items & Budget) */
+  itemized?: ItemizedBudget | null;
 }
 /**
  * Actual paid = recorded transfers; scheduled unpaid = outstanding milestone balances; overdue is a subset of
@@ -106,6 +108,7 @@ export function financeOverview(f: FinanceInput) {
     remaining: remainingC === null ? null : fromCents(remainingC),
     over: remainingC !== null && remainingC < 0 ? fromCents(-remainingC) : 0,
     spentPct: confirmed && (budgetC as number) > 0 ? (paidC / (budgetC as number)) * 100 : null,
+    itemized: f.itemized ?? null,
   };
 }
 

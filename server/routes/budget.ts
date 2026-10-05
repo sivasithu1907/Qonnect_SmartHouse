@@ -6,7 +6,7 @@ import { badRequest, parseBody, parsePatch, uuidParam, zMoney, zQty, zText } fro
 import { withTx } from '../db';
 import { audit, diff } from '../audit';
 import { getOwned, insertRow, patchOwned } from '../lib/crud';
-import { miscAllowance, sumMoney } from '../../shared/calc';
+import { itemizedBudget, miscAllowance, sumMoney } from '../../shared/calc';
 
 // The budget uses ONE amount per item: the approved / finalized amount. Legacy source and
 // variant estimate columns may still exist in older databases but are never read or returned.
@@ -67,10 +67,22 @@ export function budgetSummary(project: Record<string, unknown>, b: Awaited<Retur
   });
   const misc = miscAllowance(b.categories, b.items.filter((i) => activeCatIds.has(i.category_id)), project.misc_percentage as number);
   const approvedItems = activeItems.filter((i) => i.approved_amount !== null);
+  const approvedCommitments = sumMoney(approvedItems.map((i) => i.approved_amount));
+  const kindOf = new Map(activeCats.map((c) => [c.id, c.kind as string]));
+  const byKind = (['fixed', 'finishing', 'other'] as const).map((kind) => {
+    const its = activeItems.filter((i) => kindOf.get(i.category_id) === kind);
+    const vals = its.map((i) => i.approved_amount).filter((v) => v !== null);
+    return { kind, subtotal: sumMoney(vals), itemCount: its.length, missingCount: its.length - vals.length };
+  });
   return {
     byCategory,
+    byKind,
     misc,
-    approvedCommitments: sumMoney(approvedItems.map((i) => i.approved_amount)),
+    itemized: itemizedBudget({
+      finalizedSubtotal: approvedCommitments, missingCount: activeItems.length - approvedItems.length, miscAllowance: misc.allowance,
+      controlBudget: project.control_budget as number | null, controlBudgetConfirmed: !!project.control_budget_confirmed,
+    }),
+    approvedCommitments,
     approvedItemCount: approvedItems.length,
     itemCount: activeItems.length,
     scheduled: sumMoney(activeItems.map((i) => i.scheduled_amount)),

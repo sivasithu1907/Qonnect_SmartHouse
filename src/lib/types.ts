@@ -1,4 +1,5 @@
 import type { Role } from '../../shared/constants';
+import type { ItemizedBudget } from '../../shared/calc';
 
 export interface User { id: string; email: string; name: string; role: Role }
 export interface Member { id: string; name: string; role: Role }
@@ -26,7 +27,7 @@ export interface MiscAllowance { basis: string; percentage: number; basisAmount:
 export interface CategorySummary { id: string; name: string; kind: string; approved: number | null; scheduled: number; paid: number; itemCount: number; approvedItemCount: number }
 export interface BudgetResponse {
   categories: BudgetCategory[]; items: BudgetItem[];
-  summary: { byCategory: CategorySummary[]; misc: MiscAllowance; approvedCommitments: number; approvedItemCount: number; itemCount: number; scheduled: number; paid: number };
+  summary: { byCategory: CategorySummary[]; byKind: Array<{ kind: 'fixed' | 'finishing' | 'other'; subtotal: number; itemCount: number; missingCount: number }>; itemized: ItemizedBudget; misc: MiscAllowance; approvedCommitments: number; approvedItemCount: number; itemCount: number; scheduled: number; paid: number };
 }
 
 export interface PaymentTransaction { id: string; milestone_id: string; amount: number; paid_date: string; method: string; reference: string; notes: string; archived_at: string | null; attachment_count: number }

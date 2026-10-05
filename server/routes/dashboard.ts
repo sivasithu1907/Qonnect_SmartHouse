@@ -160,6 +160,8 @@ export async function projectDashboard(pool: pg.Pool, project: Record<string, an
       transactionCount: p.totals.transactionCount,
       unpaidCount: live.filter((m) => m.balance.pending > 0).length,
       misc: s.misc,
+      itemized: s.itemized,
+      byKind: s.byKind,
       byCategory: s.byCategory,
       upcomingPayments: live
         .filter((m) => m.balance.pending > 0 && !m.balance.isOverdue && m.status === 'active' && m.due_date && m.due_date >= today && m.due_date <= upcomingLimit)
@@ -286,7 +288,7 @@ export function portfolioRoute(pool: pg.Pool, timeZone: string) {
       out.push({
         project: p,
         finance: d.finance
-          ? { controlBudget: p.control_budget, controlBudgetConfirmed: p.control_budget_confirmed, approvedCommitments: d.finance.approvedCommitments, paid: d.finance.paid, pending: d.finance.pending, overdue: d.finance.overdue }
+          ? { controlBudget: p.control_budget, controlBudgetConfirmed: p.control_budget_confirmed, approvedCommitments: d.finance.approvedCommitments, itemized: d.finance.itemized, paid: d.finance.paid, pending: d.finance.pending, overdue: d.finance.overdue }
           : null,
         materials: { total: d.materials.total, awaitingConfirmation: d.materials.awaitingConfirmation, overdue: d.materials.overdue.length, dueSoon: d.materials.dueSoon.length },
         timeline: { total: d.timeline.total, completed: d.timeline.completed, percent: d.timeline.percent },

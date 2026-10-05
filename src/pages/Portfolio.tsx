@@ -1,3 +1,4 @@
+import type { ItemizedBudget } from '../../shared/calc';
 import React from 'react';
 import { Building2, Layers, Plus } from 'lucide-react';
 import { useApi } from '../lib/hooks';
@@ -8,7 +9,7 @@ import { Badge, Button, EmptyState, NeedsConfirmation, PageHeader, Spinner, Noti
 
 interface Row {
   project: Project;
-  finance: { controlBudget: number | null; controlBudgetConfirmed: boolean; approvedCommitments: number; paid: number; pending: number; overdue: number } | null;
+  finance: { controlBudget: number | null; controlBudgetConfirmed: boolean; approvedCommitments: number; itemized?: ItemizedBudget; paid: number; pending: number; overdue: number } | null;
   materials: { total: number; awaitingConfirmation: number; overdue: number; dueSoon: number };
   timeline: { total: number; completed: number; percent: number };
   upcomingVisits: number;
@@ -42,7 +43,7 @@ export function Portfolio({ onOpen, onCreate }: { onOpen: (id: string, s?: Secti
                 {r.finance && (
                   <>
                     <div><dt className="text-slate-500">Control budget</dt><dd className="font-semibold mt-0.5">{r.finance.controlBudget === null || !r.finance.controlBudgetConfirmed ? <NeedsConfirmation /> : formatQAR(r.finance.controlBudget)}</dd></div>
-                    <div><dt className="text-slate-500">Approved commitments</dt><dd className="font-mono font-semibold mt-0.5">{formatQAR(r.finance.approvedCommitments)}</dd></div>
+                    <div><dt className="text-slate-500">Itemized total incl. misc.</dt><dd className={`font-mono font-semibold mt-0.5 ${r.finance.itemized?.aboveControl ? 'text-rose-700' : ''}`}>{r.finance.itemized ? formatQAR(r.finance.itemized.grandTotal) : formatQAR(r.finance.approvedCommitments)}{r.finance.itemized && !r.finance.itemized.complete && <span className="block text-[10px] font-sans font-normal text-amber-800">Incomplete</span>}</dd></div>
                     <div><dt className="text-slate-500">Paid</dt><dd className="font-mono font-semibold text-sky-700 mt-0.5">{formatQAR(r.finance.paid)}</dd></div>
                     <div><dt className="text-slate-500">Pending</dt><dd className="font-mono font-semibold text-amber-800 mt-0.5">{formatQAR(r.finance.pending)}</dd></div>
                     <div><dt className="text-slate-500">Overdue</dt><dd className={`font-mono font-semibold mt-0.5 ${r.finance.overdue ? 'text-rose-700' : ''}`}>{formatQAR(r.finance.overdue)}</dd></div>

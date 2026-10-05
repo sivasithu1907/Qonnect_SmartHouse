@@ -205,3 +205,39 @@ export function isValidExternalUrl(v: string): boolean {
     return false;
   }
 }
+
+/**
+ * Itemized budget totals, shared by the budget page and the dashboard so the same records give the same numbers.
+ *   finalized items subtotal = active items with an approved / finalized amount (fixed + finishing + other)
+ *   grand total              = subtotal + miscellaneous allowance (the allowance is added exactly once; it is
+ *                              calculated on its own basis and is never a budget item)
+ *   difference               = grand total − confirmed control budget (only when the budget is confirmed)
+ * The control budget is an independent approved limit and is never derived from these totals.
+ * Contract values and payments are not part of the itemized total. All arithmetic is in cents.
+ */
+export function itemizedBudget(input: {
+  finalizedSubtotal: number; missingCount: number; miscAllowance: number;
+  controlBudget: number | string | null; controlBudgetConfirmed: boolean;
+}) {
+  const subtotalC = toCents(input.finalizedSubtotal);
+  const miscC = toCents(input.miscAllowance);
+  const grandC = subtotalC + miscC;
+  const confirmed = input.controlBudget !== null && input.controlBudget !== undefined && input.controlBudgetConfirmed;
+  const controlC = confirmed ? toCents(input.controlBudget as number) : null;
+  const diffC = controlC === null ? null : grandC - controlC;
+  return {
+    finalizedSubtotal: fromCents(subtotalC),
+    miscAllowance: fromCents(miscC),
+    grandTotal: fromCents(grandC),
+    complete: input.missingCount === 0,
+    missingCount: input.missingCount,
+    controlBudget: controlC === null ? null : fromCents(controlC),
+    controlBudgetConfirmed: confirmed,
+    /** grand total − control budget; null until the control budget is confirmed */
+    difference: diffC === null ? null : fromCents(diffC),
+    aboveControl: diffC !== null && diffC > 0 ? fromCents(diffC) : 0,
+    /** only meaningful when complete; otherwise missing amounts could fill it */
+    notAllocated: diffC !== null && diffC < 0 ? fromCents(-diffC) : 0,
+  };
+}
+export type ItemizedBudget = ReturnType<typeof itemizedBudget>;
