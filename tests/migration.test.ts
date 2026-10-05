@@ -124,7 +124,7 @@ describe('migration 002 on existing data', () => {
 
   it('is recorded once and not re-applied', async () => {
     expect((await q('SELECT filename FROM schema_migrations ORDER BY 1')).map((r) => r.filename)).toEqual([
-      '001_init.sql', '002_finalized_budget_and_categories.sql', '003_notifications_push.sql', '004_contracts.sql', '005_prerequisites.sql',
+      '001_init.sql', '002_finalized_budget_and_categories.sql', '003_notifications_push.sql', '004_contracts.sql', '005_prerequisites.sql', '006_material_schedule.sql',
     ]);
     expect(await runMigrations(pool, path.resolve('migrations'), () => undefined)).toEqual([]);
   });

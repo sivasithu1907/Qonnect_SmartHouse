@@ -21,7 +21,8 @@ export interface DashboardData {
   };
   materials: {
     total: number; awaitingConfirmation: number; responsibilityNeedsConfirmation?: number; withDate?: number;
-    overdue: Array<{ id: string; description: string; category: string; date: string | null; basis: string }>;
+    overdue: Array<{ id: string; description: string; category: string; date: string | null; basis: string; work?: boolean; legacy?: boolean }>;
+    datesNeedReview?: number;
   };
   timeline: { total: number; scheduled?: number; phases: Array<Partial<DashPhaseRow> & { blocked: number }> };
 }
@@ -83,7 +84,7 @@ export function buildSetupChecklist(d: DashboardData, can: Can): SetupItem[] {
       key: 'delivery_dates', label: 'Enter material dates', done: m.total > 0 && dated >= m.total,
       progress: m.total ? of(dated, m.total) : null,
       count: m.total ? { done: dated, total: m.total, unit: 'entered' } : null,
-      detail: m.total === 0 ? 'No material lines yet.' : dated >= m.total ? 'Every line has a required-on-site or delivery date.' : `${m.total - dated} line(s) have no required-on-site or delivery date.`,
+      detail: m.total === 0 ? 'No material lines yet.' : dated >= m.total ? 'Every line has a planned or actual date.' : `${m.total - dated} line(s) have no planned delivery, planned completion or earlier date.`,
       action: m.total > dated ? { kind: 'href', href: `#/materials/${d.project.id}/filter:no-date` } : { kind: 'section', section: 'materials' },
       actionLabel: m.total > dated ? 'Show these lines' : 'Open materials',
     });
@@ -158,7 +159,7 @@ export function buildAttention(d: DashboardData, opts: { formatDate: (iso: strin
   }
   for (const x of d.materials.overdue) {
     const days = daysSince(x.date, today);
-    out.push({ key: `mat-${x.id}`, severity: 'critical', tag: 'Overdue delivery', title: x.description,
+    out.push({ key: `mat-${x.id}`, severity: 'critical', tag: x.work ? 'Overdue contractor work' : 'Overdue delivery', title: x.description,
       detail: `${x.category} · ${x.basis} ${opts.formatDate(x.date)}${days ? ` · ${days} day${days === 1 ? '' : 's'} overdue` : ''}`,
       href: `#/materials/${pid}/${x.id}`, actionLabel: 'Open material', days, count: 1, unit: 'material' });
   }
@@ -184,6 +185,12 @@ export function buildAttention(d: DashboardData, opts: { formatDate: (iso: strin
     out.push({ key: `rep-${v.id}`, severity: 'warning', tag: 'Consultant report not attached', title: v.purpose,
       detail: `Visit completed ${opts.formatDate(v.date)} · no consultant report uploaded`, who: v.who || undefined,
       href: `#/consultant/${pid}/${v.id}`, actionLabel: 'Open visit', days: 0, count: 1, unit: 'visit' });
+  }
+  if (d.materials.datesNeedReview) {
+    const n = d.materials.datesNeedReview;
+    out.push({ key: 'mat-review', severity: 'warning', tag: 'Material dates need review', title: `${n} material line${n === 1 ? '' : 's'} with older dates to confirm`,
+      detail: 'They keep their previous deadlines and reminders until an authorised user confirms the planned date (or the supply responsibility).',
+      href: `#/materials/${pid}/filter:review`, actionLabel: `Show ${n === 1 ? 'this line' : `these ${n} lines`}`, days: 0, count: n, unit: 'material' });
   }
   if (d.materials.awaitingConfirmation) {
     const n = d.materials.awaitingConfirmation;

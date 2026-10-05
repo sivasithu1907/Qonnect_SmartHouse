@@ -6,6 +6,7 @@ export function mat(over: Partial<MaterialItem>): MaterialItem {
     id: over.id ?? 'm', category: 'Tiles', category_id: 'c1', category_sort: 1, category_archived_at: null, description: 'Line', quantity: null, unit: '', amount: null,
     supply_responsibility: 'needs_confirmation', responsibility_note: '', vendor: '', assigned_contractor_id: null, assigned_contractor_name: null, status: 'Ordered',
     required_on_site_date: null, planned_delivery_date: null, confirmed_delivery_date: null, revised_delivery_date: null, actual_delivery_date: null, delivery_date_note: '',
+    planned_completion_date: null, actual_completion_date: null, delivery_schedule_confirmed_at: null, work_schedule_confirmed_at: null,
     qty_ordered: null, qty_delivered: null, inspection_status: '', next_follow_up_date: null, document_url: '', notes: '', source_label: '', is_package: false, archived_at: null, attachment_count: 0,
     ...over,
   };

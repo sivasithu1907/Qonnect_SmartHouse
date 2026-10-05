@@ -144,16 +144,20 @@ describe('next 14 days', () => {
     expect(t).toMatch(/Visits & inspections 1/);
     expect((h.match(/>Open</g) ?? []).length).toBe(3);
   });
-  it('a required-on-site date is labelled as such and never as a delivery; delivery state is shown separately', () => {
-    const t = text(renderToStaticMarkup(<UpcomingPanel projectId="p1" today="2026-10-16" days={14} can={() => true} items={[
-      item({ key: 'r', dateKind: 'required', dateLabel: 'Required on site', deliveryStatus: 'none', title: 'Granite' }),
-      item({ key: 'p', dateKind: 'planned', deliveryStatus: 'unconfirmed', title: 'Porcelain', requiredOnSite: '2026-10-20' }),
-      item({ key: 'c', dateKind: 'confirmed', dateLabel: 'Supplier-confirmed delivery', deliveryStatus: 'confirmed', title: 'Ceramic' }),
-    ]} />));
-    expect(t).toMatch(/Granite Required on site · Tiles · Owner supply · Delivery date not entered/);
-    expect(t).toMatch(/Porcelain Planned delivery · Tiles · Owner supply · Not supplier-confirmed · needed on site 20\/10\/2026/);
-    expect(t).toMatch(/Ceramic Supplier-confirmed delivery · Tiles · Owner supply Ordered/);
-    expect(t).not.toMatch(/Granite[^·]*delivery ·/);
+  it('owner deliveries, contractor work and previous dates are labelled distinctly', () => {
+    const html = renderToStaticMarkup(<UpcomingPanel projectId="p1" today="2026-10-16" days={14} can={() => true} items={[
+      item({ key: 'r', workflow: 'owner', legacy: true, dateLabel: 'Required on site (previous date)', title: 'Granite' }),
+      item({ key: 'p', workflow: 'owner', dateLabel: 'Planned delivery', title: 'Porcelain' }),
+      item({ key: 'w', workflow: 'contractor', dateLabel: 'Planned completion', title: 'Gypsum works', who: 'Contractor supply' }),
+    ]} />);
+    const t = text(html);
+    expect(t).toMatch(/Granite Required on site \(previous date\) · Tiles · Owner supply · Dates need review in Material Supply/);
+    expect(t).toMatch(/Porcelain Planned delivery · Tiles · Owner supply Ordered/);
+    expect(t).toMatch(/Gypsum works Planned completion · Tiles · Contractor supply/);
+    expect(html).toContain('Contractor work');
+    expect(html).toContain('Material delivery');
+    expect(html).toContain('Material date (needs review)');
+    expect(t).not.toMatch(/supplier-confirmed/i);
   });
   it('empty state', () => {
     expect(text(renderToStaticMarkup(<UpcomingPanel projectId="p1" items={[]} today="2026-10-15" days={14} can={() => true} />))).toContain('Nothing is dated in the next 14 days');

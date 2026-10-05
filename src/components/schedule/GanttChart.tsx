@@ -170,7 +170,7 @@ export function GanttChart({ phases, tasks, materials, materialCategories, today
           <Button size="sm" aria-label="Scroll later" disabled={noDates} onClick={() => scrollBy(1)}><ChevronRight className="w-4 h-4" /></Button>
         </div>
         <label className="flex items-center gap-1.5 text-xs text-slate-700">
-          <input type="checkbox" checked={withMaterials} onChange={(e) => setWithMaterials(e.target.checked)} />Include material deliveries
+          <input type="checkbox" checked={withMaterials} onChange={(e) => setWithMaterials(e.target.checked)} />Include materials &amp; contractor work
         </label>
         <label className="flex items-center gap-1.5 text-xs text-slate-700" title="Hides chart rows for phases that have no phase dates and no dated tasks. Their tasks stay listed under Not scheduled.">
           <input type="checkbox" checked={hideEmpty} onChange={(e) => setHideEmpty(e.target.checked)} />Hide phases without dates
@@ -183,7 +183,7 @@ export function GanttChart({ phases, tasks, materials, materialCategories, today
           <span className="inline-flex items-center gap-1"><Link2 className="w-3 h-3" />Dependency</span>
         </div>
       </div>
-      {withMaterials && <MarkLegend />}
+      {withMaterials && <MarkLegend only={['planned', 'actual', 'planned_work', 'actual_work', ...(mat.scheduled.some((e) => e.review) ? ['legacy' as const] : [])]} />}
 
       {noDates ? (
         <CompactEmpty title="No planned dates entered yet">
@@ -247,7 +247,7 @@ export function GanttChart({ phases, tasks, materials, materialCategories, today
         description="No planned start or finish yet. Open a task to enter its dates."
         emptyText="Every task has at least one planned date."
         footer={withMaterials && mat.unscheduled.length > 0
-          ? <><Package className="w-3 h-3 inline -mt-0.5" /> {mat.unscheduled.length} material line(s) have no delivery or required-on-site date — see Material Supply › Schedule.</>
+          ? <><Package className="w-3 h-3 inline -mt-0.5" /> {mat.unscheduled.length} material line(s) have no planned or actual date — see Material Supply › Schedule.</>
           : undefined} />
     </div>
   );
@@ -282,7 +282,7 @@ function RowLabel({ r, narrow, collapsed, onToggle, onOpenPhase, onOpenTask }: {
     );
   }
   if (r.type === 'mat-head') {
-    return <>{chevron}<div className="text-xs font-bold text-slate-900 flex items-center gap-1"><Package className="w-3.5 h-3.5 text-sky-600" />Material deliveries <span className="font-normal text-slate-400">({r.count})</span></div></>;
+    return <>{chevron}<div className="text-xs font-bold text-slate-900 flex items-center gap-1"><Package className="w-3.5 h-3.5 text-sky-600" />Materials &amp; contractor work <span className="font-normal text-slate-400">({r.count})</span></div></>;
   }
   return <div className="pl-6 pr-2 text-xs text-slate-700 truncate" title={r.name}>{r.name} <span className="text-slate-400">({r.entries.length})</span></div>;
 }
@@ -352,8 +352,8 @@ function RowBars({ r, x, ppd, zoom, today, taskById, onOpenPhase, onOpenTask, on
     <>
       {[...byDate.entries()].map(([date, list]) => {
         const first = list[0];
-        const kind = first.kind === 'actual' ? 'actual' : first.e.expected!.kind;
-        const title = list.map(({ e, kind: k }) => `${e.item.description} — ${k === 'actual' ? 'Actual delivery' : e.expected!.label} ${formatDate(date)}`).join('\n');
+        const kind = first.kind === 'actual' ? (first.e.work ? 'actual_work' : 'actual') : first.e.expected!.kind;
+        const title = list.map(({ e, kind: k }) => `${e.item.description} — ${k === 'actual' ? (e.work ? 'Actual completion' : 'Actual delivery') : e.expected!.label} ${formatDate(date)}`).join('\n');
         const items = [...new Set(list.map((l) => l.e.item))];
         return (
           <button key={date} type="button" onClick={() => onOpenMaterials(items)} title={title} aria-label={title}

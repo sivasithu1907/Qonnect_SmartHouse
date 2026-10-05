@@ -7,7 +7,7 @@ import { Badge, Card, EmptyState, inputCls, Notice, PageHeader, Spinner, Table, 
 
 const TONE: Record<string, 'emerald' | 'amber' | 'rose' | 'sky' | 'slate' | 'violet'> = {
   create: 'emerald', update: 'sky', archive: 'rose', restore: 'amber', approve: 'violet', unapprove: 'amber',
-  delivery_date_change: 'amber', complete: 'emerald', upload: 'sky', seed: 'slate',
+  delivery_date_change: 'amber', schedule_confirmed: 'violet', complete: 'emerald', upload: 'sky', seed: 'slate',
 };
 
 export function AuditLog({ project }: { project: Project }) {

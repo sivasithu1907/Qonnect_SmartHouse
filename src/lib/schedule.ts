@@ -1,7 +1,8 @@
 // Pure date and model helpers for the Material Supply schedule and the Timeline Gantt view.
 // Dates are ISO calendar dates (YYYY-MM-DD) handled as UTC day numbers, so the browser's time
 // zone never shifts a date. Nothing here invents, fills in or changes a date.
-import { expectedDeliveryDate, isMaterialOpen, type ExpectedDateKind } from '../../shared/calc';
+import { isScheduleOverdue, materialSchedule } from '../../shared/materialSchedule';
+import type { MarkKind } from '../components/schedule/ScheduleMarks';
 import type { MaterialItem, Phase, Task } from './types';
 
 const DAY = 86_400_000;
@@ -66,47 +67,53 @@ export const inRange = (iso: string | null | undefined, start: string, end: stri
 // ------------------------------------------------------------------ material schedule model
 export interface ScheduleMark {
   date: string;
-  /** expected = governing expected delivery; required = need-by date shown alongside; actual = delivered */
-  role: 'expected' | 'required' | 'actual';
-  kind: ExpectedDateKind | 'actual';
+  /** expected = the deadline (planned date, or previous date while under review); actual = delivered / completed */
+  role: 'expected' | 'actual';
+  kind: MarkKind;
   label: string;
 }
 export interface MaterialEntry {
   item: MaterialItem;
-  expected: { date: string; kind: ExpectedDateKind; label: string } | null;
+  expected: { date: string; kind: MarkKind; label: string } | null;
   actual: string | null;
   marks: ScheduleMark[];
-  /** open line whose expected date is in the past and has no actual delivery */
+  /** delivery / work still outstanding after its deadline */
   overdue: boolean;
+  /** contractor work (planned / actual completion), kept distinct from material deliveries */
+  work: boolean;
+  /** older dates await review; the previous deadline is shown */
+  review: boolean;
 }
 
-/** One entry per material line. Lines with no usable date go to `unscheduled`; nothing is filled in. */
+/**
+ * One entry per material line, using the shared simplified schedule: owner supply → planned / actual
+ * delivery, contractor supply → planned / actual completion; lines under review show their previous
+ * deadline. Lines with no usable date go to `unscheduled`; nothing is filled in.
+ */
 export function buildMaterialSchedule(items: MaterialItem[], today: string): { scheduled: MaterialEntry[]; unscheduled: MaterialItem[] } {
   const scheduled: MaterialEntry[] = [];
   const unscheduled: MaterialItem[] = [];
   for (const item of items) {
-    const exp = expectedDeliveryDate({
-      revised_delivery_date: isValidISO(item.revised_delivery_date) ? item.revised_delivery_date : null,
-      confirmed_delivery_date: isValidISO(item.confirmed_delivery_date) ? item.confirmed_delivery_date : null,
-      planned_delivery_date: isValidISO(item.planned_delivery_date) ? item.planned_delivery_date : null,
-      required_on_site_date: isValidISO(item.required_on_site_date) ? item.required_on_site_date : null,
-    });
-    const actual = isValidISO(item.actual_delivery_date) ? item.actual_delivery_date : null;
+    const s = materialSchedule(item);
+    const work = s.workflow === 'contractor' && !s.needsReview;
+    const dl = s.deadline && isValidISO(s.deadline.date) ? s.deadline : null;
+    const exp = dl ? { date: dl.date, kind: (dl.legacy ? 'legacy' : work ? 'planned_work' : 'planned') as MarkKind, label: dl.label } : null;
+    // under review, only a real delivery date is shown as "actual" (never as completed work)
+    const actualDate = s.needsReview || s.workflow === 'unassigned' ? item.actual_delivery_date : s.actual;
+    const actual = isValidISO(actualDate) ? actualDate : null;
     if (!exp && !actual) { unscheduled.push(item); continue; }
     const marks: ScheduleMark[] = [];
     if (exp) marks.push({ date: exp.date, role: 'expected', kind: exp.kind, label: exp.label });
-    // the need-by date stays visible next to a delivery date so lateness against it can be seen
-    if (exp && exp.kind !== 'required' && isValidISO(item.required_on_site_date)) {
-      marks.push({ date: item.required_on_site_date, role: 'required', kind: 'required', label: 'Required on site' });
-    }
-    if (actual) marks.push({ date: actual, role: 'actual', kind: 'actual', label: 'Actual delivery' });
-    const overdue = !!exp && !actual && isMaterialOpen(item.status) && exp.date < today;
-    scheduled.push({ item, expected: exp, actual, marks, overdue });
+    if (actual) marks.push({ date: actual, role: 'actual', kind: work ? 'actual_work' : 'actual', label: work ? 'Actual completion' : 'Actual delivery' });
+    scheduled.push({ item, expected: exp, actual, marks, overdue: !item.archived_at && isScheduleOverdue(s, today), work, review: s.needsReview });
   }
   const key = (e: MaterialEntry) => e.expected?.date ?? e.actual ?? '';
   scheduled.sort((a, b) => key(a).localeCompare(key(b)) || a.item.description.localeCompare(b.item.description));
   return { scheduled, unscheduled };
 }
+
+/** Mark kinds present in a set of entries (for a legend that shows only what is on screen). */
+export const markKindsIn = (entries: MaterialEntry[]): MarkKind[] => [...new Set(entries.flatMap((e) => e.marks.map((m) => m.kind)))];
 
 /** Entries with at least one mark inside the period, plus how many dated entries fall before/after it. */
 export function entriesInPeriod(entries: MaterialEntry[], start: string, end: string) {

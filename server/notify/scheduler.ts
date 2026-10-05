@@ -5,6 +5,7 @@ import type pg from 'pg';
 import { addDaysISO, todayISO } from '../../shared/calc';
 import type { NotifyEvent, Notifier } from './notifier';
 import { projectUserIds } from './events';
+import { materialSchedule } from '../../shared/materialSchedule';
 
 export const DUE_SOON_DAYS = 3;
 const LOCK_KEY = 727002;
@@ -37,22 +38,31 @@ export async function collectDueEvents(db: pg.Pool | pg.PoolClient, today: strin
     });
   }
 
-  // --- open material lines by their governing delivery date
+  // --- material lines: owner delivery by planned delivery, contractor work by planned completion,
+  //     lines under date review keep their previous deadline (same rule as the dashboard).
+  //     The dedupe key is kind + line + date, so an unchanged date never alerts twice.
   const mats = await db.query(
-    `SELECT m.id, m.project_id, m.assigned_contractor_id,
-            COALESCE(m.revised_delivery_date, m.confirmed_delivery_date, m.planned_delivery_date, m.required_on_site_date)::text AS due
+    `SELECT m.id, m.project_id, m.assigned_contractor_id, m.status, m.supply_responsibility,
+            m.required_on_site_date::text, m.planned_delivery_date::text, m.confirmed_delivery_date::text,
+            m.revised_delivery_date::text, m.actual_delivery_date::text, m.planned_completion_date::text,
+            m.actual_completion_date::text, m.delivery_schedule_confirmed_at, m.work_schedule_confirmed_at,
+            m.qty_ordered, m.qty_delivered
        FROM material_items m JOIN projects p ON p.id = m.project_id AND p.archived_at IS NULL
-      WHERE m.archived_at IS NULL AND m.actual_delivery_date IS NULL
-        AND m.status NOT IN ('Delivered','Accepted','Cancelled')
-        AND COALESCE(m.revised_delivery_date, m.confirmed_delivery_date, m.planned_delivery_date, m.required_on_site_date) <= $1`,
+      WHERE m.archived_at IS NULL AND m.status <> 'Cancelled'
+        AND LEAST(m.revised_delivery_date, m.confirmed_delivery_date, m.planned_delivery_date, m.required_on_site_date, m.planned_completion_date) <= $1`,
     [soon],
   );
   for (const r of mats.rows) {
-    const overdue = r.due < today;
+    const sch = materialSchedule(r);
+    if (!sch.outstanding || !sch.deadline || sch.deadline.date > soon) continue;
+    const due = sch.deadline.date;
+    const overdue = due < today;
     const kind = overdue ? 'material.overdue' : 'material.due_soon';
+    const work = sch.workflow === 'contractor' && !sch.deadline.legacy;
     const common = {
       projectId: r.project_id, eventType: 'material_due' as const, kind, entityType: 'material', entityId: r.id, section: 'materials' as const,
-      dedupeKey: `${kind}:${r.id}:${r.due}`, body: overdue ? 'A material delivery is overdue.' : 'A material delivery is due soon.',
+      dedupeKey: `${kind}:${r.id}:${due}`,
+      body: work ? (overdue ? 'Contractor work is overdue.' : 'Contractor work is due soon.') : (overdue ? 'A material delivery is overdue.' : 'A material delivery is due soon.'),
     };
     events.push({ ...common, recipients: await usersOf(r.project_id), requiredCap: 'materials.write' });
     if (r.assigned_contractor_id) events.push({ ...common, recipients: [r.assigned_contractor_id], requiredCap: 'materials.contractor' });

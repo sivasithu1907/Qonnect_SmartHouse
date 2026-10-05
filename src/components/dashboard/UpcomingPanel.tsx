@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CalendarDays, ClipboardCheck, Hammer, MapPin, PackageCheck, Search, Truck } from 'lucide-react';
+import { CalendarDays, ClipboardCheck, Hammer, MapPin, PackageCheck, Search, Truck, Wrench } from 'lucide-react';
 import { formatDate } from '../../lib/format';
 import { groupByDate, UPCOMING_TABS, upcomingDateLine, upcomingMatches, upcomingWindowEnd, type UpcomingItem, type UpcomingTab } from '../../lib/dashboard';
 import { inputCls, StatusBadge } from '../ui';
@@ -8,7 +8,10 @@ import { Section } from './Section';
 const TAB_LABEL: Record<UpcomingTab, string> = { all: 'All', materials: 'Materials', tasks: 'Tasks', visits: 'Visits & inspections' };
 
 function kindOf(i: UpcomingItem): { label: string; Icon: React.FC<{ className?: string }> } {
-  if (i.kind === 'material') return i.dateKind === 'required' ? { label: 'Material needed on site', Icon: PackageCheck } : { label: 'Material delivery', Icon: Truck };
+  if (i.kind === 'material') {
+    if (i.legacy) return { label: 'Material date (needs review)', Icon: PackageCheck };
+    return i.workflow === 'contractor' ? { label: 'Contractor work', Icon: Wrench } : { label: 'Material delivery', Icon: Truck };
+  }
   if (i.kind === 'task') return { label: 'Task', Icon: Hammer };
   if (i.kind === 'consultant_visit') return { label: 'Consultant visit', Icon: ClipboardCheck };
   return { label: 'Site visit', Icon: MapPin };
@@ -67,7 +70,6 @@ export function UpcomingPanel({ projectId, items, today, days, can }: { projectI
                         <p className="text-xs text-slate-500 mt-0.5 break-words">
                           {meta.join(' · ')}
                           {line.delivery && <span className="text-amber-800"> · {line.delivery}</span>}
-                          {i.kind === 'material' && i.requiredOnSite && i.dateKind !== 'required' && <span> · needed on site {formatDate(i.requiredOnSite)}</span>}
                         </p>
                       </div>
                       <div className="col-start-2 sm:col-start-3 flex items-center gap-2 sm:justify-end">

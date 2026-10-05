@@ -29,35 +29,43 @@ describe('material schedule model', () => {
   const today = '2026-10-15';
   it('one entry per line; undated lines are listed as not scheduled and nothing is filled in', () => {
     const items = [
-      mat({ id: 'a', planned_delivery_date: '2026-10-20', required_on_site_date: '2026-10-18' }),
-      mat({ id: 'b', required_on_site_date: '2026-10-22' }),
-      mat({ id: 'c' }),
-      mat({ id: 'd', actual_delivery_date: '2026-10-02', status: 'Delivered' }),
-      mat({ id: 'e', confirmed_delivery_date: '2026-10-10' }), // open, past → overdue
-      mat({ id: 'f', planned_delivery_date: 'not-a-date' }),
+      mat({ id: 'a', supply_responsibility: 'owner', planned_delivery_date: '2026-10-20' }),
+      mat({ id: 'b', supply_responsibility: 'owner', required_on_site_date: '2026-10-22' }), // older date only → review
+      mat({ id: 'c', supply_responsibility: 'owner' }),
+      mat({ id: 'd', supply_responsibility: 'owner', actual_delivery_date: '2026-10-02', status: 'Delivered' }),
+      mat({ id: 'e', supply_responsibility: 'owner', planned_delivery_date: '2026-10-10' }), // open, past → overdue
+      mat({ id: 'f', supply_responsibility: 'owner', planned_delivery_date: 'not-a-date' }),
+      mat({ id: 'g', supply_responsibility: 'contractor', planned_completion_date: '2026-10-25' }),
+      mat({ id: 'h', supply_responsibility: 'contractor', planned_completion_date: '2026-10-11', actual_completion_date: '2026-10-12' }),
+      mat({ id: 'i', supply_responsibility: 'contractor', planned_delivery_date: '2026-10-05', actual_delivery_date: '2026-10-06' }), // old delivery dates → review
+      mat({ id: 'j', supply_responsibility: 'owner', planned_delivery_date: '2026-10-09', actual_delivery_date: '2026-10-08', status: 'Partially Delivered' }),
     ];
     const { scheduled, unscheduled } = buildMaterialSchedule(items, today);
-    expect(scheduled.map((e) => e.item.id).sort()).toEqual(['a', 'b', 'd', 'e']);
+    expect(scheduled.map((e) => e.item.id).sort()).toEqual(['a', 'b', 'd', 'e', 'g', 'h', 'i', 'j']);
     expect(unscheduled.map((m) => m.id).sort()).toEqual(['c', 'f']);
     expect(new Set(scheduled.map((e) => e.item.id)).size).toBe(scheduled.length);
+    const by = (id: string) => scheduled.find((e) => e.item.id === id)!;
 
-    const a = scheduled.find((e) => e.item.id === 'a')!;
-    expect(a.expected).toMatchObject({ kind: 'planned', date: '2026-10-20' });
-    // need-by date kept as its own mark, labelled as such
-    expect(a.marks).toEqual([
-      { date: '2026-10-20', role: 'expected', kind: 'planned', label: 'Planned delivery' },
-      { date: '2026-10-18', role: 'required', kind: 'required', label: 'Required on site' },
-    ]);
-    const b = scheduled.find((e) => e.item.id === 'b')!;
-    expect(b.expected).toMatchObject({ kind: 'required', label: 'Required on site' });
-    expect(b.marks).toHaveLength(1);
-    const d = scheduled.find((e) => e.item.id === 'd')!;
-    expect(d.expected).toBeNull();
-    expect(d.marks).toEqual([{ date: '2026-10-02', role: 'actual', kind: 'actual', label: 'Actual delivery' }]);
-    expect(scheduled.find((e) => e.item.id === 'e')!.overdue).toBe(true);
-    expect(a.overdue).toBe(false);
+    expect(by('a').marks).toEqual([{ date: '2026-10-20', role: 'expected', kind: 'planned', label: 'Planned delivery' }]);
+    expect(by('a').overdue).toBe(false);
+    // older date only: shown as a previous date awaiting review, never as a planned delivery
+    expect(by('b')).toMatchObject({ review: true, expected: { kind: 'legacy', date: '2026-10-22', label: 'Required on site (previous date)' } });
+    expect(by('d').expected).toBeNull();
+    expect(by('d').marks).toEqual([{ date: '2026-10-02', role: 'actual', kind: 'actual', label: 'Actual delivery' }]);
+    expect(by('e').overdue).toBe(true);
+    // contractor work uses its own marks and labels
+    expect(by('g')).toMatchObject({ work: true, expected: { kind: 'planned_work', label: 'Planned completion', date: '2026-10-25' } });
+    expect(by('h').marks.map((m) => [m.kind, m.label])).toEqual([['planned_work', 'Planned completion'], ['actual_work', 'Actual completion']]);
+    expect(by('h').overdue).toBe(false);
+    // old delivery dates on contractor work are not reinterpreted as completion
+    expect(by('i')).toMatchObject({ work: false, review: true });
+    expect(by('i').marks.map((m) => m.kind)).toEqual(['legacy', 'actual']);
+    expect(by('i').marks.some((m) => m.kind === 'actual_work' || m.kind === 'planned_work')).toBe(false);
+    // a partial delivery stays outstanding even with an actual delivery date
+    expect(by('j').overdue).toBe(true);
     // the input records are not modified
     expect(items[2].planned_delivery_date).toBeNull();
+    expect(items[8].planned_completion_date).toBeNull();
   });
 
   it('actual delivery is shown separately from the expected date', () => {
@@ -190,7 +198,13 @@ describe('schedule data comes from existing records under existing permissions',
     expect((await c.patch(`${P}/materials/${m2.id}`, { confirmed_delivery_date: '2026-11-18' })).status).toBe(403);
     const items: MaterialItem[] = (await c.get(`${P}/materials`)).body.items;
     const e = buildMaterialSchedule(items, '2026-10-15').scheduled.find((x) => x.item.id === m1.id)!;
-    expect(e.expected).toEqual({ date: '2026-11-18', kind: 'confirmed', label: 'Supplier-confirmed delivery' });
-    expect(e.marks.find((k) => k.role === 'required')?.date).toBe('2026-11-20');
+    // older supplier-confirmed / required dates on an owner line: previous deadline kept until reviewed
+    expect(e.review).toBe(true);
+    expect(e.expected).toEqual({ date: '2026-11-18', kind: 'legacy', label: 'Supplier-confirmed delivery (previous date)' });
+    // an authorised user confirms it as the planned delivery → simplified schedule
+    expect((await c.post(`${P}/materials/${m1.id}/confirm-schedule`, { workflow: 'owner', planned_source: 'confirmed_delivery_date' })).status).toBe(403);
+    expect((await admin.post(`${P}/materials/${m1.id}/confirm-schedule`, { workflow: m1.supply_responsibility, planned_source: 'confirmed_delivery_date' })).status).toBe(200);
+    const after: MaterialItem[] = (await c.get(`${P}/materials`)).body.items;
+    expect(buildMaterialSchedule(after, '2026-10-15').scheduled.find((x) => x.item.id === m1.id)!.expected).toEqual({ date: '2026-11-18', kind: 'planned', label: 'Planned delivery' });
   });
 });

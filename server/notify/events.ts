@@ -2,7 +2,7 @@
 // (assignment, rescheduling, delivery-date changes) — ordinary edits do not.
 import type pg from 'pg';
 import type { NotifyEvent } from './notifier';
-import { effectiveDeliveryDate } from '../../shared/calc';
+import { materialSchedule } from '../../shared/materialSchedule';
 
 type Row = Record<string, any>;
 const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : v === null || v === undefined ? '' : String(v));
@@ -58,14 +58,21 @@ export function taskAssignedEvents(before: Row | null, after: Row, actorId: stri
   }];
 }
 
-/** Delivery-date change on a material line → material managers and the assigned contractor. */
+/**
+ * Schedule change on a material line (planned / actual delivery for owner supply, planned / actual
+ * completion for contractor work, or the previous deadline while under review) → material managers
+ * and the assigned contractor.
+ */
 export async function materialDateEvents(db: pg.Pool | pg.PoolClient, before: Row, after: Row, actorId: string): Promise<NotifyEvent[]> {
-  const b = effectiveDeliveryDate(before as never);
-  const a = effectiveDeliveryDate(after as never);
-  if (after.archived_at || (b.date === a.date && b.basis === a.basis)) return [];
+  const b = materialSchedule(before as never);
+  const a = materialSchedule(after as never);
+  const sig = (s: typeof a) => `${s.workflow}|${s.deadline?.date ?? ''}|${s.deadline?.legacy ? 'legacy' : ''}|${s.actual ?? ''}`;
+  if (after.archived_at || sig(b) === sig(a)) return [];
+  const work = a.workflow === 'contractor';
   const common = {
     projectId: after.project_id, eventType: 'material_date' as const, kind: 'material.date_changed', entityType: 'material', entityId: after.id,
-    dedupeKey: `material.date_changed:${after.id}:${a.basis}:${a.date ?? 'none'}`, body: 'A material delivery date has changed.', section: 'materials' as const,
+    dedupeKey: `material.date_changed:${after.id}:${a.workflow}:${a.deadline?.date ?? 'none'}:${a.actual ?? 'none'}`,
+    body: work ? 'A contractor work date has changed.' : 'A material delivery date has changed.', section: 'materials' as const,
     excludeUserId: actorId,
   };
   const events: NotifyEvent[] = [{ ...common, recipients: await projectUserIds(db, after.project_id), requiredCap: 'materials.write' }];

@@ -6,28 +6,39 @@ import { loadBudget, budgetSummary } from './budget';
 import { loadPayments } from './payments';
 import { loadMaterials } from './materials';
 import { loadTimeline } from './timeline';
-import { addDaysISO, AWAITING_CONFIRMATION_STATUSES, effectiveDeliveryDate, expectedDeliveryDate, isMaterialOpen, sumMoney, todayISO } from '../../shared/calc';
+import { addDaysISO, AWAITING_CONFIRMATION_STATUSES, sumMoney, todayISO } from '../../shared/calc';
+import { DATE_FIELD_LABELS, hasAnySchedule, materialSchedule, WORKFLOW_LABELS } from '../../shared/materialSchedule';
 import { SUPPLY_RESPONSIBILITY_LABELS } from '../../shared/constants';
 
 function materialStats(items: any[], today: string) {
   const soon = addDaysISO(today, 14);
   const live = items.filter((m) => !m.archived_at);
-  const withEff: any[] = live.map((m) => ({ ...m, eff: effectiveDeliveryDate(m) }));
+  const withSch: any[] = live.map((m) => ({ ...m, sch: materialSchedule(m) }));
   const byStatus: Record<string, number> = {};
   for (const m of live) byStatus[m.status] = (byStatus[m.status] ?? 0) + 1;
-  const open = withEff.filter((m) => isMaterialOpen(m.status) && !m.actual_delivery_date);
-  const pick = (m: any) => ({ id: m.id, category: m.category, description: m.description, status: m.status, date: m.eff.date, basis: m.eff.basis });
+  const open = withSch.filter((m) => m.sch.outstanding && m.sch.deadline);
+  const pick = (m: any) => ({
+    id: m.id, category: m.category, description: m.description, status: m.status,
+    date: m.sch.deadline.date, basis: m.sch.deadline.label, legacy: m.sch.deadline.legacy,
+    workflow: m.sch.workflow as string, work: m.sch.workflow === 'contractor' && !m.sch.deadline.legacy,
+  });
+  const overdue = open.filter((m) => m.sch.deadline.date < today).map(pick);
+  const review = withSch.filter((m) => m.sch.needsReview);
   return {
     total: live.length,
     byStatus,
     awaitingConfirmation: live.filter((m) => AWAITING_CONFIRMATION_STATUSES.has(m.status)).length,
-    dueSoon: open.filter((m) => m.eff.date && m.eff.date >= today && m.eff.date <= soon).map(pick),
-    overdue: open.filter((m) => m.eff.date && m.eff.date < today).map(pick),
-    partiallyDelivered: live.filter((m) => m.status === 'Partially Delivered').length,
+    dueSoon: open.filter((m) => m.sch.deadline.date >= today && m.sch.deadline.date <= soon).map(pick),
+    overdue,
+    overdueDeliveries: overdue.filter((x) => !x.work).length,
+    overdueWork: overdue.filter((x) => x.work).length,
+    partiallyDelivered: withSch.filter((m) => m.sch.partial).length,
     inspectionPending: live.filter((m) => m.status === 'Inspection Pending' || m.inspection_status === 'Pending').length,
+    // older dates that need an authorised user to confirm the planned date (or the responsibility)
+    datesNeedReview: review.length,
     // setup progress, from saved values only
     responsibilityNeedsConfirmation: live.filter((m) => m.supply_responsibility === 'needs_confirmation').length,
-    withDate: withEff.filter((m) => m.actual_delivery_date || m.eff.date).length,
+    withDate: withSch.filter((m) => hasAnySchedule(m.sch)).length,
   };
 }
 
@@ -36,21 +47,20 @@ export const UPCOMING_DAYS = 14;
 
 /**
  * Dated activity in [today, today + 13] for the "Next 14 days" panel. Overdue records are left out
- * (they belong to Needs attention). Material dates follow the existing expected-date precedence
- * (revised > supplier-confirmed > planned > required on site) and keep their label.
+ * (they belong to Needs attention). Owner supply uses its planned delivery, contractor work its
+ * planned completion; lines whose older dates await review keep their previous deadline, labelled as such.
  */
 function upcomingActivity(pid: string, today: string, materials: any[], tasks: any[], consultant: any[], site: any[]) {
   const end = addDaysISO(today, UPCOMING_DAYS - 1);
   const inWindow = (d: string | null | undefined) => !!d && d >= today && d <= end;
   const out: Array<Record<string, unknown>> = [];
   for (const m of materials) {
-    if (m.archived_at || !isMaterialOpen(m.status) || m.actual_delivery_date) continue;
-    const e = expectedDeliveryDate(m);
-    if (!e || !inWindow(e.date)) continue;
+    if (m.archived_at) continue;
+    const sch = materialSchedule(m);
+    if (!sch.outstanding || !sch.deadline || !inWindow(sch.deadline.date)) continue;
     const resp = SUPPLY_RESPONSIBILITY_LABELS[m.supply_responsibility as keyof typeof SUPPLY_RESPONSIBILITY_LABELS] ?? '';
-    out.push({ key: `material-${m.id}`, kind: 'material', id: m.id, date: e.date, dateLabel: e.label, dateKind: e.kind,
-      deliveryStatus: m.confirmed_delivery_date ? 'confirmed' : m.planned_delivery_date || m.revised_delivery_date ? 'unconfirmed' : 'none',
-      requiredOnSite: m.required_on_site_date ?? null, title: m.description, context: m.category,
+    out.push({ key: `material-${m.id}`, kind: 'material', id: m.id, date: sch.deadline.date, dateLabel: sch.deadline.label,
+      workflow: sch.workflow, legacy: sch.deadline.legacy, title: m.description, context: m.category,
       who: [resp, m.assigned_contractor_name || m.vendor].filter(Boolean).join(' · '), status: m.status, href: `#/materials/${pid}/${m.id}` });
   }
   for (const t of tasks) {
@@ -251,9 +261,22 @@ export function dashboardRoutes(pool: pg.Pool, timeZone: string) {
   r.get('/reports/materials.csv', async (req, res) => {
     assertCap(req, 'materials.read');
     const m = await loadMaterials(pool, req.project!.id);
+    const today = todayISO(timeZone);
     sendCsv(res, `materials-${safeCode(req.project!.code)}.csv`,
-      ['Category', 'Description', 'Quantity', 'Unit', 'Amount (QAR)', 'Supply responsibility', 'Vendor', 'Status', 'Required on site / supply due', 'Planned delivery', 'Confirmed delivery', 'Revised delivery', 'Actual delivery', 'Date note', 'Qty ordered', 'Qty delivered', 'Inspection', 'Next follow-up', 'Notes', 'Source'],
-      m.items.map((x) => [x.category, x.description, x.quantity, x.unit, x.amount, SUPPLY_RESPONSIBILITY_LABELS[x.supply_responsibility as keyof typeof SUPPLY_RESPONSIBILITY_LABELS], x.vendor, x.status, x.required_on_site_date, x.planned_delivery_date, x.confirmed_delivery_date, x.revised_delivery_date, x.actual_delivery_date, x.delivery_date_note, x.qty_ordered, x.qty_delivered, x.inspection_status, x.next_follow_up_date, x.notes, x.source_label]));
+      ['Category', 'Description', 'Quantity', 'Unit', 'Amount (QAR)', 'Supply responsibility', 'Vendor', 'Status',
+        'Schedule', 'Planned date', 'Actual date', 'Deadline used', 'Date review', 'Overdue',
+        'Qty ordered', 'Qty delivered', 'Inspection', 'Next follow-up', 'Notes', 'Source',
+        'Planned delivery', 'Actual delivery', 'Planned completion', 'Actual completion',
+        `Previous: ${DATE_FIELD_LABELS.required_on_site_date}`, `Previous: ${DATE_FIELD_LABELS.confirmed_delivery_date}`, `Previous: ${DATE_FIELD_LABELS.revised_delivery_date}`, 'Previous: delivery date note'],
+      m.items.map((x) => {
+        const s = materialSchedule(x as never);
+        return [x.category, x.description, x.quantity, x.unit, x.amount, SUPPLY_RESPONSIBILITY_LABELS[x.supply_responsibility as keyof typeof SUPPLY_RESPONSIBILITY_LABELS], x.vendor, x.status,
+          s.workflow === 'unassigned' ? 'Needs responsibility' : WORKFLOW_LABELS[s.workflow].kind, s.planned, s.actual,
+          s.deadline ? `${s.deadline.date} (${s.deadline.label})` : '', s.needsReview ? 'Needs review' : '', s.outstanding && s.deadline && s.deadline.date < today ? 'yes' : '',
+          x.qty_ordered, x.qty_delivered, x.inspection_status, x.next_follow_up_date, x.notes, x.source_label,
+          x.planned_delivery_date, x.actual_delivery_date, x.planned_completion_date, x.actual_completion_date,
+          x.required_on_site_date, x.confirmed_delivery_date, x.revised_delivery_date, x.delivery_date_note];
+      }));
   });
 
   r.get('/reports/budget.csv', async (req, res) => {

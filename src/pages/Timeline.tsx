@@ -234,7 +234,7 @@ export function Timeline({ project, focusId, onFocusHandled }: { project: Projec
       </Modal>
 
       <Modal open={!!detail} onClose={() => setDetail(null)}
-        title={detail?.kind === 'task' ? detail.row.name : detail?.kind === 'phase' ? `${detail.row.seq}. ${detail.row.name}` : 'Material deliveries'}
+        title={detail?.kind === 'task' ? detail.row.name : detail?.kind === 'phase' ? `${detail.row.seq}. ${detail.row.name}` : 'Materials & contractor work'}
         subtitle={detail?.kind === 'materials' ? 'Open a line in Material Supply to see or update it.' : 'Read-only'}>
         {detail?.kind === 'task' && <TaskDetail t={detail.row} phase={phaseOf(detail.row)} taskById={taskById} />}
         {detail?.kind === 'phase' && <PhaseDetail p={detail.row} tasks={data.tasks.filter((t) => t.phase_id === detail.row.id)} />}

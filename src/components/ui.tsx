@@ -249,7 +249,7 @@ export interface Option {
   /** an existing link to a record that is no longer offered for new selections */
   archived?: boolean;
 }
-export type FieldType = 'searchselect' | 'password' | 'text' | 'textarea' | 'number' | 'money' | 'date' | 'datetime' | 'select' | 'checkbox' | 'url' | 'multiselect';
+export type FieldType = 'searchselect' | 'password' | 'text' | 'textarea' | 'number' | 'money' | 'date' | 'datetime' | 'select' | 'checkbox' | 'url' | 'multiselect' | 'section' | 'custom';
 export interface FieldSpec {
   name: string;
   label: string;
@@ -267,6 +267,10 @@ export interface FieldSpec {
   noMatchLabel?: string;
   fallbackLabel?: string;
   searchPlaceholder?: string;
+  /** shown only while this returns true for the current form values; a hidden field keeps its value and is never cleared */
+  showWhen?: (vals: Record<string, any>) => boolean;
+  /** type 'custom': renders arbitrary content from the current form values (no value of its own) */
+  render?: (vals: Record<string, any>, set: (k: string, v: any) => void) => React.ReactNode;
 }
 
 type Values = Record<string, any>;
@@ -472,17 +476,20 @@ export const inputCls = 'w-full rounded-lg border border-slate-200 bg-white px-3
 export function RecordForm({ fields, initial, onSubmit, onCancel, submitLabel = 'Save', mode = initial ? 'edit' : 'create', extra }: {
   fields: FieldSpec[]; initial?: Values | null; onSubmit: (v: Values) => Promise<void>; onCancel: () => void; submitLabel?: string; mode?: 'create' | 'edit'; extra?: React.ReactNode;
 }) {
-  const visible = fields.filter((f) => !f.hidden);
+  const isValueField = (f: FieldSpec) => f.type !== 'section' && f.type !== 'custom';
+  const visible = fields.filter((f) => !f.hidden && isValueField(f));
   const start = useMemo(() => Object.fromEntries(visible.map((f) => [f.name, toInput(f, initial?.[f.name])])), [initial]); // eslint-disable-line react-hooks/exhaustive-deps
   const [vals, setVals] = useState<Values>(start);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const set = (k: string, v: any) => setVals((s) => ({ ...s, [k]: v }));
+  const shown = (f: FieldSpec) => !f.showWhen || f.showWhen(vals);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr(null);
-    for (const f of visible) {
+    // only fields currently shown are validated
+    for (const f of visible.filter(shown)) {
       if (f.required && !f.disabled && (vals[f.name] === '' || vals[f.name] === null)) { setErr(`${f.label} is required`); return; }
       if (f.type === 'url' && vals[f.name] && !/^https?:\/\//i.test(vals[f.name])) { setErr(`${f.label} must start with https://`); return; }
     }
@@ -491,8 +498,11 @@ export function RecordForm({ fields, initial, onSubmit, onCancel, submitLabel = 
       if (f.disabled) continue;
       const nv = fromInput(f, vals[f.name]);
       if (mode === 'edit') {
+        // unchanged values (including hidden ones) are never sent, so nothing is cleared
         const ov = fromInput(f, start[f.name]);
         if (JSON.stringify(nv) === JSON.stringify(ov)) continue;
+      } else if (!shown(f) && (nv === null || nv === '')) {
+        continue; // a hidden, empty field is not sent on create
       }
       out[f.name] = nv;
     }
@@ -509,9 +519,18 @@ export function RecordForm({ fields, initial, onSubmit, onCancel, submitLabel = 
   return (
     <form onSubmit={submit} className="space-y-4">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {visible.map((f) => {
+        {fields.filter((f) => !f.hidden && shown(f)).map((f) => {
           const t = f.type ?? 'text';
           const id = `f-${f.name}`;
+          if (t === 'section') {
+            return (
+              <div key={f.name} className="sm:col-span-2 pt-2 border-t border-slate-100 first:border-0 first:pt-0">
+                <h3 className="text-sm font-bold text-slate-900">{f.label}</h3>
+                {f.help && <p className="text-[11px] text-slate-500 mt-0.5">{f.help}</p>}
+              </div>
+            );
+          }
+          if (t === 'custom') return <div key={f.name} className="sm:col-span-2">{f.render?.(vals, set)}</div>;
           const wide = f.wide || t === 'textarea' || t === 'multiselect';
           return (
             <div key={f.name} className={wide ? 'sm:col-span-2' : ''}>

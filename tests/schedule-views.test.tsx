@@ -18,11 +18,12 @@ const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '
 
 describe('Material Supply — Schedule view', () => {
   const items = [
-    mat({ id: 'a', description: 'Floor tiles', confirmed_delivery_date: '2026-10-13', required_on_site_date: '2026-10-15', supply_responsibility: 'owner' }),
-    mat({ id: 'b', description: 'Wall tiles', required_on_site_date: '2026-10-14' }),
-    mat({ id: 'c', category_id: 'c2', category: 'Sanitary ware', description: 'WC pans', revised_delivery_date: '2026-10-12', actual_delivery_date: '2026-10-16', status: 'Delivered' }),
+    mat({ id: 'a', description: 'Floor tiles', planned_delivery_date: '2026-10-13', supply_responsibility: 'owner' }),
+    mat({ id: 'b', description: 'Wall tiles', required_on_site_date: '2026-10-14', supply_responsibility: 'owner' }), // older date only → review
+    mat({ id: 'c', category_id: 'c2', category: 'Sanitary ware', description: 'WC pans', planned_delivery_date: '2026-10-12', actual_delivery_date: '2026-10-14', status: 'Delivered', supply_responsibility: 'owner' }),
     mat({ id: 'd', category_id: 'c2', category: 'Sanitary ware', description: 'Basins' }),
-    mat({ id: 'e', description: 'Skirting', planned_delivery_date: '2026-10-11', status: 'Ordered' }),
+    mat({ id: 'e', description: 'Skirting', planned_delivery_date: '2026-10-11', status: 'Ordered', supply_responsibility: 'owner' }),
+    mat({ id: 'f', description: 'Gypsum ceiling', planned_completion_date: '2026-10-16', planned_delivery_date: '2026-10-10', supply_responsibility: 'contractor', status: 'Delivered' }),
   ];
   const html = renderToStaticMarkup(<MaterialSchedule items={items} categories={cats} today="2026-10-15" onOpen={noop} />);
   const t = text(html);
@@ -31,21 +32,25 @@ describe('Material Supply — Schedule view', () => {
     expect(html).toContain('data-testid="period-label"');
     expect(t).toContain('11 Oct – 17 Oct 2026');
     expect(t.indexOf('Tiles')).toBeLessThan(t.indexOf('Sanitary ware'));
-    for (const d of ['Floor tiles', 'Wall tiles', 'WC pans', 'Skirting']) expect(t).toContain(d);
+    for (const d of ['Floor tiles', 'Wall tiles', 'WC pans', 'Skirting', 'Gypsum ceiling']) expect(t).toContain(d);
   });
 
-  it('labels each date kind and never shows a required-on-site date as supplier-confirmed', () => {
-    expect(t).toContain('Expected 13/10/2026 · Supplier-confirmed delivery');
-    expect(t).toContain('Expected 14/10/2026 · Required on site');
-    expect(t).not.toMatch(/Wall tiles — Supplier-confirmed/);
-    expect(html).toContain('Wall tiles — Required on site 14/10/2026');
-    expect(html).toContain('Floor tiles — Required on site 15/10/2026'); // need-by shown next to the delivery date
-    expect(t).toContain('Expected 12/10/2026 · Revised delivery');
-    expect(t).toContain('Actual 16/10/2026'); // actual separate from expected
-    expect(html).toContain('WC pans — Actual delivery 16/10/2026');
-    expect(t).toContain('Expected 11/10/2026 · Planned delivery');
-    expect(t).toMatch(/Overdue/); // Skirting: open, planned date passed, not delivered
-    expect(t).toContain('Owner supply');
+  it('owner delivery and contractor work use their own labels; older dates are shown only as previous dates', () => {
+    expect(t).toContain('Planned delivery 13/10/2026');
+    expect(html).toContain('Floor tiles — Planned delivery 13/10/2026');
+    expect(t).toMatch(/Wall tiles .*Dates need review Required on site \(previous date\) 14\/10\/2026/);
+    expect(html).toContain('WC pans — Actual delivery 14/10/2026');
+    expect(t).toContain('Delivered 14/10/2026');
+    expect(t).toMatch(/Skirting Ordered Owner supply Overdue/); // open, planned date passed, not delivered
+    // contractor work: planned completion, not the old delivery date; a delivered status is not completed work
+    expect(html).toContain('Gypsum ceiling — Planned completion 16/10/2026');
+    expect(html).not.toContain('Gypsum ceiling — Planned delivery');
+    expect(t).not.toMatch(/Gypsum ceiling[^]*Completed \d/);
+    expect(t).not.toMatch(/Supplier-confirmed|Revised delivery/);
+    // legend: simplified kinds, plus the previous-date marker only while a line awaits review
+    for (const l of ['Planned delivery', 'Actual delivery', 'Planned completion', 'Actual completion', 'Previous date (needs review)']) expect(t).toContain(l);
+    const reconciled = text(renderToStaticMarkup(<MaterialSchedule items={items.filter((m) => m.id !== 'b')} categories={cats} today="2026-10-15" onOpen={noop} />));
+    expect(reconciled).not.toContain('Previous date (needs review)');
   });
 
   it('keeps undated lines in a labelled Not scheduled area', () => {
@@ -62,7 +67,7 @@ describe('Material Supply — Schedule view', () => {
     expect(empty).toContain('Not scheduled — 1 line');
     const quiet = text(renderToStaticMarkup(<MaterialSchedule items={items} categories={cats} today="2026-10-15" onOpen={noop} initialAnchor="2026-12-01" />));
     expect(quiet).toContain('Nothing scheduled in this week');
-    expect(quiet).toContain('Outside this week: 4 earlier · 0 later.');
+    expect(quiet).toContain('Outside this week: 5 earlier · 0 later.');
   });
 
   it('is read-only: no drag handles or date inputs', () => {
@@ -80,8 +85,8 @@ describe('Project Timeline — Gantt view', () => {
     task('t4', 'p2', { name: 'Painting' }),
   ];
   const materials = [
-    mat({ id: 'm1', description: 'Floor tiles', planned_delivery_date: '2026-10-25' }),
-    mat({ id: 'm2', description: 'Grout', required_on_site_date: '2026-10-25' }),
+    mat({ id: 'm1', description: 'Floor tiles', planned_delivery_date: '2026-10-25', supply_responsibility: 'owner' }),
+    mat({ id: 'm2', description: 'Grout', planned_completion_date: '2026-10-25', supply_responsibility: 'contractor' }),
     mat({ id: 'm3', description: 'Doors' }),
   ];
   const render = (over: Record<string, unknown> = {}) =>
@@ -115,14 +120,15 @@ describe('Project Timeline — Gantt view', () => {
     expect(t).toContain('Painting');
   });
 
-  it('material deliveries are optional milestones read from material lines, with the same labels', () => {
-    expect(text(render())).not.toContain('Material deliveries');
+  it('materials and contractor work are optional milestones read from material lines, with the same labels', () => {
+    expect(text(render())).not.toContain('Materials & contractor work (');
     const html = render({ initialIncludeMaterials: true });
     const t = text(html);
-    expect(t).toContain('Material deliveries');
+    expect(t).toContain('Materials & contractor work (2)');
     expect(html).toContain('Floor tiles — Planned delivery 25/10/2026');
-    expect(html).toContain('Grout — Required on site 25/10/2026');
-    expect(t).toContain('1 material line(s) have no delivery or required-on-site date');
+    expect(html).toContain('Grout — Planned completion 25/10/2026');
+    expect(t).not.toContain('Previous date (needs review)');
+    expect(t).toContain('1 material line(s) have no planned or actual date');
   });
 
   it('month zoom renders and an empty plan shows guidance instead of a chart', () => {

@@ -78,7 +78,7 @@ export function createApp(pool: pg.Pool, cfg: AppConfig, opts: AppOptions = {}) 
   project.use('/payments', paymentRoutes(pool, cfg.timeZone));
   project.use('/contracts', contractRoutes(pool, cfg.timeZone));
   project.use('/prerequisites', prerequisiteRoutes(pool, cfg.timeZone));
-  project.use('/materials', materialRoutes(pool, notifier));
+  project.use('/materials', materialRoutes(pool, notifier, cfg.timeZone));
   project.use('/visits', visitRoutes(pool, notifier));
   project.use('/timeline', timelineRoutes(pool, notifier));
   project.use('/work-updates', workUpdateRoutes(pool));

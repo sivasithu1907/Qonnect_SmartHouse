@@ -11,6 +11,8 @@ import { can, CONTRACTOR_MATERIAL_FIELDS } from '../permissions';
 import { INSPECTION_STATUSES, MATERIAL_STATUSES, SUPPLY_RESPONSIBILITIES } from '../../shared/constants';
 import type { Notifier } from '../notify/notifier';
 import { materialDateEvents } from '../notify/events';
+import { todayISO } from '../../shared/calc';
+import { DATE_FIELD_LABELS, materialSchedule, type DateField } from '../../shared/materialSchedule';
 
 export async function loadMaterials(db: pg.Pool | pg.PoolClient, projectId: string, includeArchived = false) {
   const [items, notes] = await Promise.all([
@@ -35,7 +37,18 @@ export async function loadMaterials(db: pg.Pool | pg.PoolClient, projectId: stri
   return { items: items.rows, scopeNotes: notes.rows };
 }
 
-const DATE_FIELDS = ['required_on_site_date', 'planned_delivery_date', 'confirmed_delivery_date', 'revised_delivery_date', 'actual_delivery_date'];
+const DATE_FIELDS = ['required_on_site_date', 'planned_delivery_date', 'confirmed_delivery_date', 'revised_delivery_date', 'actual_delivery_date',
+  'planned_completion_date', 'actual_completion_date'];
+
+/** An actual delivery / completion date can't be later than today (application time zone). */
+function assertActualDatesNotFuture(body: Record<string, unknown>, today: string) {
+  for (const f of ['actual_delivery_date', 'actual_completion_date'] as const) {
+    const v = body[f];
+    if (typeof v === 'string' && v.slice(0, 10) > today) {
+      throw badRequest(`${f === 'actual_delivery_date' ? 'Actual delivery' : 'Actual completion'} date can't be in the future. Enter it once the ${f === 'actual_delivery_date' ? 'material has arrived' : 'work has finished'}.`);
+    }
+  }
+}
 
 /** Material lines must use a category from the project's centrally managed list. */
 async function assertMaterialCategory(c: pg.PoolClient, projectId: string, categoryId: string) {
@@ -61,6 +74,8 @@ const materialSchema = z.object({
   revised_delivery_date: zDate.optional(),
   actual_delivery_date: zDate.optional(),
   delivery_date_note: zText(300).default(''),
+  planned_completion_date: zDate.optional(),
+  actual_completion_date: zDate.optional(),
   qty_ordered: zQty.optional(),
   qty_delivered: zQty.optional(),
   inspection_status: z.enum(INSPECTION_STATUSES).default(''),
@@ -71,7 +86,7 @@ const materialSchema = z.object({
   sort_order: z.number().int().min(0).max(100000).optional(),
 });
 
-export function materialRoutes(pool: pg.Pool, notifier: Notifier) {
+export function materialRoutes(pool: pg.Pool, notifier: Notifier, timeZone = 'Asia/Qatar') {
   const r = Router({ mergeParams: true });
 
   r.get('/', async (req, res) => {
@@ -82,6 +97,7 @@ export function materialRoutes(pool: pg.Pool, notifier: Notifier) {
   r.post('/', async (req, res) => {
     assertCap(req, 'materials.write');
     const body = parseBody(materialSchema, req);
+    assertActualDatesNotFuture(body, todayISO(timeZone));
     const pid = req.project!.id;
     const row = await withTx(pool, async (c) => {
       await assertMaterialCategory(c, pid, body.category_id);
@@ -105,6 +121,7 @@ export function materialRoutes(pool: pg.Pool, notifier: Notifier) {
     const contractor = can(u.role, 'materials.contractor');
     if (!full && !contractor) throw forbidden();
     const body = parsePatch(materialSchema.partial(), req) as Record<string, unknown>;
+    assertActualDatesNotFuture(body, todayISO(timeZone));
     const out = await withTx(pool, async (c) => {
       const current = await getOwned<Record<string, unknown>>(c, 'material_items', pid, id);
       let patch = body;
@@ -134,6 +151,82 @@ export function materialRoutes(pool: pg.Pool, notifier: Notifier) {
       return { before, after, dateChanged: dateChanges.length > 0 };
     });
     if (out.dateChanged) notifier.emit(await materialDateEvents(pool, out.before, out.after, u.id).catch(() => []));
+    res.json(out.after);
+  });
+
+  /**
+   * Explicit date reconciliation by an authorised user. The chosen saved date becomes the planned
+   * date of the line's current workflow; older fields keep their values (Previous date details).
+   * Contractor work never takes a delivery date unless the user picks it here.
+   */
+  const OWNER_SOURCES = ['planned_delivery_date', 'required_on_site_date', 'confirmed_delivery_date', 'revised_delivery_date'] as const;
+  const WORK_SOURCES = ['required_on_site_date', 'planned_delivery_date', 'confirmed_delivery_date', 'revised_delivery_date', 'actual_delivery_date'] as const;
+  const confirmSchema = z.object({
+    workflow: z.enum(['owner', 'contractor']),
+    planned_source: z.string().max(40),
+    actual_from_delivery: z.boolean().optional(),
+  });
+  r.post('/:id/confirm-schedule', async (req, res) => {
+    assertCap(req, 'materials.write');
+    const id = uuidParam(req, 'id');
+    const pid = req.project!.id;
+    const body = parseBody(confirmSchema, req);
+    const out = await withTx(pool, async (c) => {
+      const current = await getOwned<Record<string, any>>(c, 'material_items', pid, id, { forUpdate: true });
+      if (current.archived_at) throw badRequest('This material line is archived. Restore it first.');
+      if (current.supply_responsibility !== body.workflow) {
+        throw badRequest(current.supply_responsibility === 'needs_confirmation'
+          ? 'Select and save Owner supply or Contractor supply first, then confirm the schedule.'
+          : 'The saved supply responsibility has changed. Save the responsibility first, then confirm the schedule.');
+      }
+      const val = (f: string) => (current[f] ? String(current[f]).slice(0, 10) : null);
+      const patch: Record<string, unknown> = {};
+      let note: string;
+      if (body.workflow === 'owner') {
+        const src = body.planned_source;
+        if (src === 'none') {
+          if (val('planned_delivery_date')) throw badRequest('Choose the planned delivery date to keep.');
+          note = 'planned delivery left blank';
+        } else {
+          if (!(OWNER_SOURCES as readonly string[]).includes(src)) throw badRequest('Choose one of the saved delivery dates.');
+          const d = val(src);
+          if (!d) throw badRequest(`${DATE_FIELD_LABELS[src as DateField]} has no saved date.`);
+          if (d !== val('planned_delivery_date')) patch.planned_delivery_date = d;
+          note = `planned delivery ${d} (from ${DATE_FIELD_LABELS[src as DateField].toLowerCase()})`;
+        }
+        patch.delivery_schedule_confirmed_at = new Date();
+      } else {
+        const src = body.planned_source;
+        if (src === 'none') {
+          note = 'planned completion not taken from older dates';
+        } else {
+          if (!(WORK_SOURCES as readonly string[]).includes(src)) throw badRequest('Choose one of the saved dates, or none.');
+          const d = val(src);
+          if (!d) throw badRequest(`${DATE_FIELD_LABELS[src as DateField]} has no saved date.`);
+          if (d !== val('planned_completion_date')) patch.planned_completion_date = d;
+          note = `planned completion ${d} (from ${DATE_FIELD_LABELS[src as DateField].toLowerCase()})`;
+        }
+        if (body.actual_from_delivery) {
+          const a = val('actual_delivery_date');
+          if (!a) throw badRequest('There is no actual delivery date to use.');
+          if (val('actual_completion_date') && val('actual_completion_date') !== a) throw badRequest('An actual completion date is already saved. Edit it in the form instead.');
+          patch.actual_completion_date = a;
+          note += `; actual completion ${a} (from actual delivery)`;
+        }
+        patch.work_schedule_confirmed_at = new Date();
+      }
+      const { before, after } = await patchOwned(c, 'material_items', pid, id, patch);
+      const d = diff(before, after);
+      await audit(c, req, {
+        projectId: pid, action: 'schedule_confirmed', entityType: 'material', entityId: id,
+        summary: `${after.category} — ${after.description}: ${body.workflow === 'owner' ? 'delivery' : 'work'} schedule confirmed — ${note}`,
+        before: d.before, after: d.after,
+      });
+      return { before, after };
+    });
+    const b = materialSchedule(out.before as never).deadline;
+    const a = materialSchedule(out.after as never).deadline;
+    if (b?.date !== a?.date || b?.label !== a?.label) notifier.emit(await materialDateEvents(pool, out.before, out.after, req.user!.id).catch(() => []));
     res.json(out.after);
   });
 

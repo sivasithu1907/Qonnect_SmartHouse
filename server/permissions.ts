@@ -59,4 +59,5 @@ export function capabilitiesFor(role: Role): Capability[] {
 export const CONTRACTOR_MATERIAL_FIELDS = [
   'status', 'vendor', 'planned_delivery_date', 'confirmed_delivery_date', 'revised_delivery_date',
   'actual_delivery_date', 'qty_ordered', 'qty_delivered', 'next_follow_up_date', 'notes', 'document_url',
+  'planned_completion_date', 'actual_completion_date',
 ] as const;

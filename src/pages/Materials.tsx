@@ -8,15 +8,30 @@ import { categoryOptions } from '../lib/options';
 import { ManageCategories } from '../components/ManageCategories';
 import { todayLocalISO } from '../lib/format';
 import { INSPECTION_STATUSES, MATERIAL_STATUSES, SUPPLY_RESPONSIBILITIES, SUPPLY_RESPONSIBILITY_LABELS } from '../../shared/constants';
-import { effectiveDeliveryDate, isMaterialOpen } from '../../shared/calc';
 import { Attachments } from '../components/Attachments';
 import { Badge, Button, Card, EmptyState, inputCls, Kpi, LinkButton, Modal, NeedsConfirmation, Notice, PageHeader, RecordForm, Spinner, StatusBadge, Tabs, useUi, type FieldSpec } from '../components/ui';
 import { MaterialSchedule } from '../components/schedule/MaterialSchedule';
 import { MaterialDateSummary } from '../components/schedule/ScheduleMarks';
+import { DateReviewPanel, PreviousDateDetails, ScheduleWarningList } from '../components/materials/MaterialScheduleParts';
+import { materialSchedule } from '../../shared/materialSchedule';
+import { formatDate } from '../lib/format';
 import { MaterialCategorySection, useWideLayout } from '../components/materials/MaterialCategorySection';
-import { matchesQuickFilter, QUICK_FILTER_LABELS, QUICK_FILTERS, quickFilterCounts, quickFilterFromFocus, type QuickFilter } from '../lib/materialFilters';
+import { matchesQuickFilter, overdueSplit, QUICK_FILTER_LABELS, QUICK_FILTERS, quickFilterCounts, quickFilterFromFocus, type QuickFilter } from '../lib/materialFilters';
 
-const CONTRACTOR_FIELDS = new Set(['status', 'vendor', 'planned_delivery_date', 'confirmed_delivery_date', 'revised_delivery_date', 'actual_delivery_date', 'qty_ordered', 'qty_delivered', 'next_follow_up_date', 'notes', 'document_url']);
+const CONTRACTOR_FIELDS = new Set(['status', 'vendor', 'planned_delivery_date', 'actual_delivery_date', 'qty_ordered', 'qty_delivered', 'planned_completion_date', 'actual_completion_date', 'next_follow_up_date', 'notes', 'document_url']);
+const RESP = (v: Record<string, any>) => String(v.supply_responsibility ?? 'needs_confirmation');
+/** Current form values as schedule input ('' → null), on top of the saved line. */
+const scheduleInput = (row: MaterialItem | null, v: Record<string, any>) => {
+  const n = (k: string) => (v[k] === undefined ? (row as any)?.[k] ?? null : v[k] === '' ? null : v[k]);
+  return {
+    ...(row ?? {}), supply_responsibility: RESP(v), status: String(v.status ?? row?.status ?? ''),
+    required_on_site_date: row?.required_on_site_date ?? null, confirmed_delivery_date: row?.confirmed_delivery_date ?? null, revised_delivery_date: row?.revised_delivery_date ?? null,
+    planned_delivery_date: n('planned_delivery_date'), actual_delivery_date: n('actual_delivery_date'),
+    planned_completion_date: n('planned_completion_date'), actual_completion_date: n('actual_completion_date'),
+    qty_ordered: n('qty_ordered'), qty_delivered: n('qty_delivered'),
+    delivery_date_note: row?.delivery_date_note ?? '',
+  };
+};
 
 export function Materials({ project, focusId, onFocusHandled }: { project: Project } & FocusProps) {
   const base = `/api/projects/${project.id}/materials`;
@@ -64,9 +79,27 @@ export function Materials({ project, focusId, onFocusHandled }: { project: Proje
   if (error) return <Notice tone="rose">{error}</Notice>;
   if (!data) return <Spinner />;
   const live = data.items.filter((m) => !m.archived_at);
-  const overdue = live.filter((m) => { const e = effectiveDeliveryDate(m); return isMaterialOpen(m.status) && !m.actual_delivery_date && e.date && e.date < today; });
+  const overdue = overdueSplit(live, today);
 
   const contractors = (members ?? []).filter((u) => u.role === 'contractor');
+  /** review panel, date / status checks and previous date details for the workflow selected in the form */
+  const scheduleBlock = (row: MaterialItem | null, v: Record<string, any>, set: (k: string, val: any) => void, previousOnly = false) => {
+    const input = scheduleInput(row, v);
+    return (
+      <div className="space-y-2">
+        {!previousOnly && row && (
+          <DateReviewPanel row={row} formResponsibility={RESP(v)} canConfirm={full && !row.archived_at} endpoint={`${base}/${row.id}/confirm-schedule`}
+            onConfirmed={async (u) => {
+              for (const k of ['planned_delivery_date', 'planned_completion_date', 'actual_completion_date'] as const) if (u[k] !== row[k]) set(k, u[k] ?? '');
+              setEdit({ row: { ...row, ...u, category: row.category, assigned_contractor_name: row.assigned_contractor_name, attachment_count: row.attachment_count } });
+              toast('Schedule confirmed'); await reload();
+            }} />
+        )}
+        {!previousOnly && <ScheduleWarningList m={input} today={today} />}
+        {row && <PreviousDateDetails m={input} />}
+      </div>
+    );
+  };
   const fields = (row: MaterialItem | null): FieldSpec[] => {
     const lock = (name: string) => !full && !CONTRACTOR_FIELDS.has(name);
     const f: FieldSpec[] = [
@@ -81,14 +114,31 @@ export function Materials({ project, focusId, onFocusHandled }: { project: Proje
       { name: 'vendor', label: 'Contractor / vendor' },
       { name: 'assigned_contractor_id', label: 'Assigned contractor user (can update this line)', type: 'select', nullable: true, options: contractors.map((c) => ({ value: c.id, label: c.name })), hidden: !full },
       { name: 'status', label: 'Status', type: 'select', options: MATERIAL_STATUSES.map((s) => ({ value: s, label: s })) },
-      { name: 'required_on_site_date', label: 'Required on site / supply due', type: 'date' },
-      { name: 'planned_delivery_date', label: 'Planned delivery', type: 'date' },
-      { name: 'confirmed_delivery_date', label: 'Supplier-confirmed delivery', type: 'date' },
-      { name: 'revised_delivery_date', label: 'Revised delivery', type: 'date' },
-      { name: 'actual_delivery_date', label: 'Actual delivery', type: 'date' },
-      { name: 'delivery_date_note', label: 'Delivery date note', placeholder: 'e.g. Contractor confirmation required' },
-      { name: 'qty_ordered', label: 'Quantity ordered', type: 'number' },
-      { name: 'qty_delivered', label: 'Quantity delivered', type: 'number' },
+      // ---- owner supply: delivery schedule
+      { name: '_sec_owner', label: 'Delivery schedule', type: 'section', showWhen: (v) => RESP(v) === 'owner',
+        help: 'Owner supply. Update the planned delivery date when plans change — every change is kept in the audit history.' },
+      { name: '_review_owner', label: '', type: 'custom', showWhen: (v) => RESP(v) === 'owner', render: (v, set) => scheduleBlock(row, v, set) },
+      { name: 'planned_delivery_date', label: 'Planned delivery date', type: 'date', showWhen: (v) => RESP(v) === 'owner', help: 'The agreed date the material should arrive on site.' },
+      { name: 'actual_delivery_date', label: 'Actual delivery date', type: 'date', showWhen: (v) => RESP(v) === 'owner', help: 'The date it actually arrived.' },
+      { name: 'qty_ordered', label: 'Quantity ordered', type: 'number', showWhen: (v) => RESP(v) !== 'contractor' },
+      { name: 'qty_delivered', label: 'Quantity delivered', type: 'number', showWhen: (v) => RESP(v) !== 'contractor', help: 'Less than ordered means a partial delivery — it stays outstanding.' },
+      // ---- contractor supply: work schedule
+      { name: '_sec_work', label: 'Work schedule', type: 'section', showWhen: (v) => RESP(v) === 'contractor',
+        help: 'Contractor supply. Material arriving on site is not completed work — record completion separately.' },
+      { name: '_review_work', label: '', type: 'custom', showWhen: (v) => RESP(v) === 'contractor', render: (v, set) => scheduleBlock(row, v, set) },
+      { name: 'planned_completion_date', label: 'Planned completion date', type: 'date', showWhen: (v) => RESP(v) === 'contractor', help: 'When the contractor should finish this item / work package.' },
+      { name: 'actual_completion_date', label: 'Actual completion date', type: 'date', showWhen: (v) => RESP(v) === 'contractor', help: 'When the work actually finished.' },
+      // ---- responsibility not yet chosen
+      { name: '_sec_none', label: 'Schedule', type: 'section', showWhen: (v) => RESP(v) === 'needs_confirmation' },
+      { name: '_none', label: '', type: 'custom', showWhen: (v) => RESP(v) === 'needs_confirmation', render: (v, set) => (
+        <div className="space-y-2">
+          <div className="rounded-lg border border-sky-200 bg-sky-50/70 px-3 py-2 text-xs text-sky-900" role="status">
+            Select <b>Owner supply</b> or <b>Contractor supply</b> above to set the schedule — owner supply tracks delivery, contractor supply tracks work completion.
+            {row && materialSchedule(row).deadline && <> Until then the previous date ({formatDate(materialSchedule(row).deadline!.date)}) keeps its reminders.</>}
+          </div>
+          {scheduleBlock(row, v, set, true)}
+        </div>
+      ) },
       { name: 'inspection_status', label: 'Inspection', type: 'select', options: INSPECTION_STATUSES.map((s) => ({ value: s, label: s || '— Not set —' })) },
       { name: 'next_follow_up_date', label: 'Next follow-up', type: 'date' },
       { name: 'document_url', label: 'Document link (e.g. Drive)', type: 'url', wide: true },
@@ -123,10 +173,16 @@ export function Materials({ project, focusId, onFocusHandled }: { project: Proje
         <Kpi label="Material lines" value={live.length} />
         <Kpi label="Status not confirmed" tone="amber" value={live.filter((m) => m.status === 'Status not confirmed').length} />
         <Kpi label="Responsibility needs confirmation" tone="amber" value={live.filter((m) => m.supply_responsibility === 'needs_confirmation').length} />
-        <Kpi label="Overdue deliveries" tone={overdue.length ? 'rose' : 'slate'} value={overdue.length} />
+        <Kpi label="Overdue" tone={overdue.total ? 'rose' : 'slate'} value={overdue.total} hint={`${overdue.deliveries} deliver${overdue.deliveries === 1 ? 'y' : 'ies'} · ${overdue.work} contractor work`} />
       </div>
 
-      <Notice tone="sky">Quantities, suppliers and delivery confirmations are blank unless entered by an authorised user. Source dates are shown only where the source tracker provides them.</Notice>
+      <Notice tone="sky">Owner supply tracks <b>planned / actual delivery</b>; contractor supply tracks <b>planned / actual completion</b> of the work. Quantities and suppliers are blank unless entered by an authorised user.</Notice>
+      {quickCounts.review > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-sm text-amber-900" role="status">
+          <span className="flex-1 min-w-0"><b>{quickCounts.review} line{quickCounts.review === 1 ? '' : 's'}</b> {quickCounts.review === 1 ? 'has' : 'have'} older dates to review. They keep their previous deadlines and reminders until the planned date is confirmed.</span>
+          <Button size="sm" onClick={() => setQuick('review')}>Show {quickCounts.review === 1 ? 'it' : 'them'}</Button>
+        </div>
+      )}
 
       <Card>
         <div className="flex flex-wrap items-center gap-2 mb-4">
@@ -145,7 +201,8 @@ export function Materials({ project, focusId, onFocusHandled }: { project: Proje
               <span className={`rounded-full px-1.5 text-[11px] ${quick === f ? 'bg-white/20' : 'bg-slate-100 text-slate-600'}`}>{f === 'all' ? quickCounts.all : quickCounts[f]}</span>
             </button>
           ))}
-          {quick === 'no-date' && <span className="text-[11px] text-slate-600">Open a line to enter its required-on-site or delivery dates. Supplier-confirmed dates are entered by an authorised user.</span>}
+          {quick === 'no-date' && <span className="text-[11px] text-slate-600">Open a line to enter its planned delivery (owner supply) or planned completion (contractor supply).</span>}
+          {quick === 'review' && <span className="text-[11px] text-slate-600">Open a line and confirm which saved date is the planned date. Older dates stay saved.</span>}
           {quick === 'responsibility' && <span className="text-[11px] text-slate-600">Open a line to set owner or contractor supply.</span>}
         </div>
         {view === 'schedule' ? (
@@ -173,7 +230,7 @@ export function Materials({ project, focusId, onFocusHandled }: { project: Proje
       </Card>
 
       <Modal open={!!edit} onClose={() => setEdit(null)} wide title={edit?.row ? `${edit.row.category} — ${edit.row.description}` : 'Add material line'}
-        subtitle={edit?.row && !full ? (edit.row.assigned_contractor_id === user.id ? 'You can update delivery, quantity, vendor and status fields on lines assigned to you.' : 'Read-only') : undefined}>
+        subtitle={edit?.row && !full ? (edit.row.assigned_contractor_id === user.id ? 'You can update schedule dates, quantities, vendor and status on lines assigned to you.' : 'Read-only') : undefined}>
         {edit && (() => {
           const row = edit.row;
           const canEdit = full || (contractor && row?.assigned_contractor_id === user.id);

@@ -50,6 +50,8 @@ export interface MaterialItem {
   assigned_contractor_id: string | null; assigned_contractor_name: string | null; status: string;
   required_on_site_date: string | null; planned_delivery_date: string | null; confirmed_delivery_date: string | null;
   revised_delivery_date: string | null; actual_delivery_date: string | null; delivery_date_note: string;
+  planned_completion_date: string | null; actual_completion_date: string | null;
+  delivery_schedule_confirmed_at: string | null; work_schedule_confirmed_at: string | null;
   qty_ordered: number | null; qty_delivered: number | null; inspection_status: string; next_follow_up_date: string | null;
   document_url: string; notes: string; source_label: string; is_package: boolean; archived_at: string | null; attachment_count: number;
 }

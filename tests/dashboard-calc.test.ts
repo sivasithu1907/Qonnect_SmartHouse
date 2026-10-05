@@ -130,12 +130,12 @@ describe('date headings and material date lines', () => {
     expect(dateHeading('2026-10-10')).toBe('10 Oct 2026 · Saturday');
     expect(groupByDate([{ date: '2026-10-10' }, { date: '2026-10-10' }, { date: '2026-10-11' }]).map((g) => g.items.length)).toEqual([2, 1]);
   });
-  it('labels required-on-site separately from delivery and shows the delivery state', async () => {
+  it('material date lines: planned delivery, planned completion, and previous dates awaiting review', async () => {
     const { upcomingDateLine } = await import('../src/lib/dashboard');
     const base = { key: 'k', kind: 'material' as const, id: '1', date: '2026-10-10', title: 't', context: '', who: '', status: 'Ordered', href: '#' };
-    expect(upcomingDateLine({ ...base, dateKind: 'required', dateLabel: 'Required on site', deliveryStatus: 'none' })).toEqual({ label: 'Required on site', delivery: 'Delivery date not entered' });
-    expect(upcomingDateLine({ ...base, dateKind: 'planned', dateLabel: 'Planned delivery', deliveryStatus: 'unconfirmed' })).toEqual({ label: 'Planned delivery', delivery: 'Not supplier-confirmed' });
-    expect(upcomingDateLine({ ...base, dateKind: 'confirmed', dateLabel: 'Supplier-confirmed delivery', deliveryStatus: 'confirmed' })).toEqual({ label: 'Supplier-confirmed delivery', delivery: null });
+    expect(upcomingDateLine({ ...base, workflow: 'owner', dateLabel: 'Planned delivery' })).toEqual({ label: 'Planned delivery', delivery: null });
+    expect(upcomingDateLine({ ...base, workflow: 'contractor', dateLabel: 'Planned completion' })).toEqual({ label: 'Planned completion', delivery: null });
+    expect(upcomingDateLine({ ...base, workflow: 'owner', legacy: true, dateLabel: 'Required on site (previous date)' })).toEqual({ label: 'Required on site (previous date)', delivery: 'Dates need review in Material Supply' });
     expect(upcomingDateLine({ ...base, kind: 'task', dateLabel: 'Planned start' })).toEqual({ label: 'Planned start', delivery: null });
   });
 });

@@ -115,8 +115,8 @@ export function financeOverview(f: FinanceInput) {
 export interface UpcomingItem {
   key: string; kind: 'material' | 'task' | 'consultant_visit' | 'site_visit'; id: string; date: string; dateLabel: string;
   title: string; context: string; who: string; status: string; href: string;
-  /** materials only: which date field the date came from, and whether a delivery date is supplier-confirmed */
-  dateKind?: 'revised' | 'confirmed' | 'planned' | 'required'; deliveryStatus?: 'confirmed' | 'unconfirmed' | 'none'; requiredOnSite?: string | null;
+  /** materials only: owner delivery or contractor work, and whether the date is a previous date awaiting review */
+  workflow?: 'owner' | 'contractor' | 'unassigned'; legacy?: boolean;
 }
 export const UPCOMING_TABS = ['all', 'materials', 'tasks', 'visits'] as const;
 export type UpcomingTab = (typeof UPCOMING_TABS)[number];
@@ -200,15 +200,10 @@ export function groupByDate<T extends { date: string }>(items: T[]): Array<{ dat
 }
 
 /**
- * The date line for an upcoming item. A required-on-site date is never presented as a delivery:
- * it is labelled "Required on site", and the delivery state is shown separately.
+ * The date line for an upcoming item. Owner supply shows its planned delivery, contractor supply its
+ * planned completion; a previous date still awaiting review is labelled as such.
  */
 export function upcomingDateLine(i: UpcomingItem): { label: string; delivery: string | null } {
   if (i.kind !== 'material') return { label: i.dateLabel, delivery: null };
-  const delivery = i.deliveryStatus === 'confirmed' ? null
-    : i.deliveryStatus === 'unconfirmed' ? 'Not supplier-confirmed'
-    : 'Delivery date not entered';
-  // required-on-site is only used when no revised / confirmed / planned delivery date exists
-  if (i.dateKind === 'required') return { label: 'Required on site', delivery: 'Delivery date not entered' };
-  return { label: i.dateLabel, delivery: i.dateKind === 'confirmed' ? null : delivery };
+  return { label: i.dateLabel, delivery: i.legacy ? 'Dates need review in Material Supply' : null };
 }

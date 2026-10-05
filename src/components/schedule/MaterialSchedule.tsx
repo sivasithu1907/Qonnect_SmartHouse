@@ -5,7 +5,7 @@ import { formatDate } from '../../lib/format';
 import { SUPPLY_RESPONSIBILITY_LABELS } from '../../../shared/constants';
 import { buildMaterialSchedule, entriesInPeriod, periodFor, shiftPeriod, dowLabel, type MaterialEntry, type PeriodMode } from '../../lib/schedule';
 import { Badge, Button, NeedsConfirmation, StatusBadge, Tabs } from '../ui';
-import { CompactEmpty, Mark, MarkLegend } from './ScheduleMarks';
+import { CompactEmpty, Mark, MarkLegend, type MarkKind } from './ScheduleMarks';
 import { UnscheduledPanel, type UnscheduledGroup } from './UnscheduledPanel';
 
 interface Props {
@@ -32,6 +32,8 @@ export function MaterialSchedule({ items, categories, today, onOpen, initialMode
   const period = useMemo(() => periodFor(mode, anchor), [mode, anchor]);
   const { scheduled, unscheduled } = useMemo(() => buildMaterialSchedule(items, today), [items, today]);
   const win = useMemo(() => entriesInPeriod(scheduled, period.start, period.end), [scheduled, period]);
+  // the previous-date marker is listed only while some line is still under review
+  const legendKinds: MarkKind[] = ['planned', 'actual', 'planned_work', 'actual_work', ...(scheduled.some((e) => e.review) ? ['legacy' as const] : [])];
 
   const byCategory = (list: { item: MaterialItem }[]) =>
     categories.map((c) => ({ c, rows: list.filter((e) => e.item.category_id === c.id) })).filter((g) => g.rows.length);
@@ -64,12 +66,12 @@ export function MaterialSchedule({ items, categories, today, onOpen, initialMode
           <Button size="sm" aria-label={`Next ${mode}`} onClick={() => setAnchor(shiftPeriod(mode, anchor, 1))}><ChevronRight className="w-4 h-4" /></Button>
         </div>
         <div className="text-sm font-bold text-slate-900" data-testid="period-label">{period.label}</div>
-        <div className="basis-full xl:basis-auto xl:ml-auto"><MarkLegend /></div>
+        <div className="basis-full xl:basis-auto xl:ml-auto"><MarkLegend only={legendKinds} /></div>
       </div>
 
       {scheduled.length === 0 ? (
         <CompactEmpty title="No material dates entered yet">
-          lines appear here once a required-on-site, planned, supplier-confirmed, revised or actual delivery date is entered on the line.
+          lines appear here once a planned or actual delivery (owner supply) or planned or actual completion (contractor supply) is entered.
         </CompactEmpty>
       ) : (
         <>
@@ -116,7 +118,7 @@ export function MaterialSchedule({ items, categories, today, onOpen, initialMode
 
       {/* lines without any usable date — never auto-filled */}
       <UnscheduledPanel groups={unschedGroups} noun={['line', 'lines']} searchPlaceholder="Search unscheduled lines"
-        description="No required-on-site, planned, confirmed, revised or actual delivery date yet. Open a line to add dates."
+        description="No planned or actual date yet. Open a line to add its planned delivery (owner supply) or planned completion (contractor supply)."
         emptyText="Every line shown has at least one date." />
     </div>
   );
@@ -130,10 +132,10 @@ function EntryRow({ e, days, today, week, onOpen }: { e: MaterialEntry; days: st
         <button type="button" onClick={() => onOpen(m)} className="text-left w-full min-w-0 group" title={m.description}>
           <div className="font-semibold text-slate-800 group-hover:text-sky-700 truncate">{m.description}</div>
         </button>
-        <div className="flex flex-wrap items-center gap-1 mt-0.5"><StatusBadge status={m.status} /><Responsibility m={m} />{e.overdue && <Badge tone="rose">Overdue</Badge>}{m.archived_at && <Badge tone="rose">Archived</Badge>}</div>
+        <div className="flex flex-wrap items-center gap-1 mt-0.5"><StatusBadge status={m.status} /><Responsibility m={m} />{e.overdue && <Badge tone="rose">{e.work ? 'Work overdue' : 'Overdue'}</Badge>}{e.review && <Badge tone="amber">Dates need review</Badge>}{m.archived_at && <Badge tone="rose">Archived</Badge>}</div>
         <div className="text-[10px] text-slate-500 mt-0.5 leading-snug">
-          {e.expected ? <>Expected {formatDate(e.expected.date)} · <span className={e.expected.kind === 'required' ? 'text-amber-700 font-semibold' : 'font-semibold'}>{e.expected.label}</span></> : <>No expected date</>}
-          {e.actual && <> · <span className="text-emerald-700 font-semibold">Actual {formatDate(e.actual)}</span></>}
+          {e.expected ? <><span className={e.expected.kind === 'legacy' ? 'text-amber-800 font-semibold' : 'font-semibold'}>{e.expected.label}</span> {formatDate(e.expected.date)}</> : <>No planned date</>}
+          {e.actual && <> · <span className={`${e.work ? 'text-indigo-700' : 'text-emerald-700'} font-semibold`}>{e.work ? 'Completed' : 'Delivered'} {formatDate(e.actual)}</span></>}
         </div>
       </div>
       {days.map((d) => {
@@ -146,7 +148,7 @@ function EntryRow({ e, days, today, week, onOpen }: { e: MaterialEntry; days: st
                 <button key={k.role} type="button" onClick={() => onOpen(m)} title={title} aria-label={title}
                   className="inline-flex items-center gap-1 rounded hover:bg-slate-100 px-0.5 max-w-full">
                   <Mark kind={k.kind} size={week ? 12 : 10} overdue={k.role === 'expected' && e.overdue} />
-                  {week && <span className={`text-[10px] truncate ${k.kind === 'actual' ? 'text-emerald-700' : k.kind === 'required' ? 'text-amber-700' : 'text-slate-600'}`}>{shortKind(k.kind)}</span>}
+                  {week && <span className={`text-[10px] truncate ${k.kind === 'actual' ? 'text-emerald-700' : k.kind === 'actual_work' ? 'text-indigo-700' : k.kind === 'legacy' ? 'text-amber-700' : 'text-slate-600'}`}>{shortKind(k.kind)}</span>}
                 </button>
               );
             })}
@@ -157,4 +159,4 @@ function EntryRow({ e, days, today, week, onOpen }: { e: MaterialEntry; days: st
   );
 }
 
-const shortKind = (k: string) => ({ revised: 'Revised', confirmed: 'Confirmed', planned: 'Planned', required: 'Required', actual: 'Delivered' } as Record<string, string>)[k] ?? k;
+const shortKind = (k: string) => ({ planned: 'Delivery', actual: 'Delivered', planned_work: 'Completion', actual_work: 'Completed', legacy: 'Review' } as Record<string, string>)[k] ?? k;

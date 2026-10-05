@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, Archive, CalendarX2, ChevronDown, ChevronRight, Clock3, FileText, Package, Pencil, RotateCcw } from 'lucide-react';
+import { AlertTriangle, Archive, CalendarX2, ChevronDown, ChevronRight, Clock3, FileText, History, Package, Pencil, RotateCcw } from 'lucide-react';
 import type { MaterialCategory, MaterialItem, ScopeNote } from '../../lib/types';
 import { formatDate, formatQAR } from '../../lib/format';
 import { SUPPLY_RESPONSIBILITY_LABELS } from '../../../shared/constants';
 import { qtyRemaining } from '../../../shared/calc';
-import { categorySummary, isOverdueLine } from '../../lib/materialFilters';
+import { categorySummary } from '../../lib/materialFilters';
+import { ScheduleCell } from './MaterialScheduleParts';
 import { Badge, Button, NeedsConfirmation, StatusBadge, Table, Td, Th } from '../ui';
 
 /** true from 768 px (tablet portrait and up): table layout; below it: one card per line. */
@@ -48,23 +49,12 @@ function Responsibility({ m }: { m: MaterialItem }) {
   );
 }
 
-function DeliveryDates({ m, late }: { m: MaterialItem; late: boolean }) {
-  const none = !m.planned_delivery_date && !m.confirmed_delivery_date && !m.revised_delivery_date && !m.actual_delivery_date && !m.delivery_date_note;
-  return (
-    <div className="text-[11px] space-y-0.5">
-      {m.planned_delivery_date && <div>Planned {formatDate(m.planned_delivery_date)}</div>}
-      {m.confirmed_delivery_date && <div>Confirmed {formatDate(m.confirmed_delivery_date)}</div>}
-      {m.revised_delivery_date && <div>Revised {formatDate(m.revised_delivery_date)}</div>}
-      {m.actual_delivery_date && <div className="text-emerald-700 font-semibold">Actual {formatDate(m.actual_delivery_date)}</div>}
-      {m.delivery_date_note && <Badge tone="amber">{m.delivery_date_note}</Badge>}
-      {none && <span className="text-slate-400">—</span>}
-      {late && <div><Badge tone="rose">Overdue</Badge></div>}
-    </div>
-  );
-}
-
 const dash = <span className="text-slate-400">—</span>;
 const qtys = (m: MaterialItem) => `${m.qty_ordered ?? '—'} / ${m.qty_delivered ?? '—'} / ${qtyRemaining(m.qty_ordered, m.qty_delivered) ?? '—'}`;
+/** ordered / delivered quantities are tracked for owner supply only (contractor work has no deliveries) */
+const QtyTracking = ({ m }: { m: MaterialItem }) => m.supply_responsibility === 'contractor'
+  ? <span className="text-slate-400" title="Not tracked for contractor supply">n/a</span>
+  : <span className="font-mono text-[11px]">{qtys(m)}</span>;
 
 function LineActions({ m, perms, onOpenLine, onArchive, onRestore, labelled }: { m: MaterialItem; perms: RowPermissions; onOpenLine: (m: MaterialItem) => void; onArchive: (m: MaterialItem) => void; onRestore: (m: MaterialItem) => void; labelled?: boolean }) {
   const editable = perms.canEditRow(m);
@@ -100,6 +90,7 @@ export function MaterialCategorySection({ category: c, items, note, today, open,
           <span className="flex flex-wrap items-center gap-1.5">
             {c.archived_at && <Badge tone="rose">Archived category</Badge>}
             {s.overdue > 0 && <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-700"><AlertTriangle className="w-3.5 h-3.5" aria-hidden="true" />{s.overdue} overdue</span>}
+            {s.review > 0 && <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-800"><History className="w-3.5 h-3.5" aria-hidden="true" />{s.review} dates to review</span>}
             {s.noDate > 0 && <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-600"><CalendarX2 className="w-3.5 h-3.5" aria-hidden="true" />{s.noDate} no dates</span>}
             {s.awaiting > 0 && <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-800"><Clock3 className="w-3.5 h-3.5" aria-hidden="true" />{s.awaiting} awaiting confirmation</span>}
           </span>
@@ -127,7 +118,7 @@ export function MaterialCategorySection({ category: c, items, note, today, open,
 
           {wide ? (
             <Table>
-              <thead><tr><Th className="w-[200px]">Item</Th><Th>Qty</Th><Th>Responsibility</Th><Th>Vendor / assigned</Th><Th>Status</Th><Th>Required on site</Th><Th>Delivery</Th><Th>Ordered / delivered / remaining</Th><Th>Inspection</Th><Th>Follow-up</Th><Th><span className="sr-only">Actions</span></Th></tr></thead>
+              <thead><tr><Th className="w-[200px]">Item</Th><Th>Qty</Th><Th>Responsibility</Th><Th>Vendor / assigned</Th><Th>Status</Th><Th>Schedule</Th><Th>Ordered / delivered / remaining</Th><Th>Inspection</Th><Th>Follow-up</Th><Th><span className="sr-only">Actions</span></Th></tr></thead>
               <tbody className="divide-y divide-slate-100">
                 {items.map((m) => (
                   <tr key={m.id} id={`rec-${m.id}`} className={m.archived_at ? 'opacity-60' : ''}>
@@ -136,9 +127,8 @@ export function MaterialCategorySection({ category: c, items, note, today, open,
                     <Td><Responsibility m={m} /></Td>
                     <Td>{m.vendor || dash}{m.assigned_contractor_name && <div className="text-[11px] text-slate-500">Assigned: {m.assigned_contractor_name}</div>}</Td>
                     <Td><StatusBadge status={m.status} /></Td>
-                    <Td className="whitespace-nowrap">{formatDate(m.required_on_site_date)}</Td>
-                    <Td className="whitespace-nowrap"><DeliveryDates m={m} late={isOverdueLine(m, today)} /></Td>
-                    <Td className="font-mono text-[11px]">{qtys(m)}</Td>
+                    <Td className="whitespace-nowrap"><ScheduleCell m={m} today={today} /></Td>
+                    <Td><QtyTracking m={m} /></Td>
                     <Td>{m.inspection_status || dash}</Td>
                     <Td className="whitespace-nowrap">{formatDate(m.next_follow_up_date)}</Td>
                     <Td className="whitespace-nowrap text-right"><LineActions m={m} perms={perms} onOpenLine={onOpenLine} onArchive={onArchive} onRestore={onRestore} /></Td>
@@ -157,17 +147,15 @@ export function MaterialCategorySection({ category: c, items, note, today, open,
                         <StatusBadge status={m.status} />
                         {m.is_package && <Badge tone="violet">Package</Badge>}
                         {m.archived_at && <Badge tone="rose">Archived</Badge>}
-                        {isOverdueLine(m, today) && <Badge tone="rose">Overdue</Badge>}
                       </div>
                     </div>
                     <LineActions m={m} perms={perms} onOpenLine={onOpenLine} onArchive={onArchive} onRestore={onRestore} labelled />
                   </div>
                   <dl className="grid grid-cols-2 gap-x-3 gap-y-2 mt-3 text-xs">
                     <div className="col-span-2"><dt className="text-[11px] text-slate-500">Responsibility</dt><dd className="mt-0.5"><Responsibility m={m} /></dd></div>
-                    <div><dt className="text-[11px] text-slate-500">Required on site</dt><dd className="mt-0.5 font-medium text-slate-800">{formatDate(m.required_on_site_date)}</dd></div>
-                    <div><dt className="text-[11px] text-slate-500">Delivery</dt><dd className="mt-0.5 text-slate-800"><DeliveryDates m={m} late={false} /></dd></div>
+                    <div className="col-span-2"><dt className="text-[11px] text-slate-500">{m.supply_responsibility === 'contractor' ? 'Work schedule' : m.supply_responsibility === 'owner' ? 'Delivery schedule' : 'Schedule'}</dt><dd className="mt-0.5 text-slate-800"><ScheduleCell m={m} today={today} /></dd></div>
                     <div><dt className="text-[11px] text-slate-500">Quantity</dt><dd className="mt-0.5 text-slate-800">{m.quantity !== null ? `${m.quantity} ${m.unit}` : dash}</dd></div>
-                    <div><dt className="text-[11px] text-slate-500">Ordered / delivered / remaining</dt><dd className="mt-0.5 font-mono text-[11px] text-slate-800">{qtys(m)}</dd></div>
+                    {m.supply_responsibility !== 'contractor' && <div><dt className="text-[11px] text-slate-500">Ordered / delivered / remaining</dt><dd className="mt-0.5 font-mono text-[11px] text-slate-800">{qtys(m)}</dd></div>}
                     <div><dt className="text-[11px] text-slate-500">Vendor / assigned</dt><dd className="mt-0.5 text-slate-800">{m.vendor || dash}{m.assigned_contractor_name && <div className="text-[11px] text-slate-500">Assigned: {m.assigned_contractor_name}</div>}</dd></div>
                     <div><dt className="text-[11px] text-slate-500">Inspection</dt><dd className="mt-0.5 text-slate-800">{m.inspection_status || dash}</dd></div>
                     <div><dt className="text-[11px] text-slate-500">Follow-up</dt><dd className="mt-0.5 text-slate-800">{formatDate(m.next_follow_up_date)}</dd></div>

@@ -19,11 +19,13 @@ describe('material quick filters', () => {
     expect(ids('no-date')).toEqual(['a']);
     expect(ids('awaiting')).toEqual(['a', 'b']);
     expect(ids('overdue')).toEqual(['c']); // d was delivered, b is in the future
+    // b (owner: required-on-site only), c (contractor: old delivery date), d (owner: revised, no planned) await review
+    expect(ids('review')).toEqual(['b', 'c', 'd']);
     expect(ids('all')).toEqual(['a', 'b', 'c', 'd']);
   });
 
   it('counts exclude archived lines and never modify records', () => {
-    expect(quickFilterCounts(items, today)).toEqual({ all: 4, overdue: 1, 'no-date': 1, awaiting: 2, responsibility: 1 });
+    expect(quickFilterCounts(items, today)).toEqual({ all: 4, overdue: 1, review: 3, 'no-date': 1, awaiting: 2, responsibility: 1 });
     expect(items[0].planned_delivery_date).toBeNull();
   });
 
