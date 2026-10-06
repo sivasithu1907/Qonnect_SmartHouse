@@ -12,6 +12,7 @@ import { ManageCategories } from '../components/ManageCategories';
 import { useWideLayout } from '../components/materials/MaterialCategorySection';
 import { Badge, Button, Card, EmptyState, inputCls, LinkButton, Modal, Notice, PageHeader, RecordForm, Spinner, StatusBadge, Table, Td, Th, useUi, type FieldSpec } from '../components/ui';
 import { budgetItemOptions } from '../lib/budgetOrder';
+import { ContractFinanceCell, ContractFinanceInline, ContractFinancePanel } from '../components/contracts/ContractFinance';
 
 export const NO_AUTO_CHANGES_NOTE = 'Saving a contract or entering its value never changes approved budget amounts, creates payment milestones or marks anything paid.';
 
@@ -127,7 +128,7 @@ export function Contracts({ project, focusId, onFocusHandled }: { project: Proje
             <thead><tr>
               <Th>Contract</Th><Th className="hidden lg:table-cell">Category</Th><Th>Contractor / company</Th><Th>Signed</Th>
               {finance && <Th className="text-right">Value</Th>}<Th>Status</Th><Th>Documents</Th>
-              {finance && <Th className="text-right">Linked payments</Th>}<Th><span className="sr-only">Open</span></Th>
+              {finance && <Th className="text-right">Paid / remaining</Th>}<Th><span className="sr-only">Open</span></Th>
             </tr></thead>
             <tbody className="divide-y divide-slate-100">
               {rows.map((k) => (
@@ -139,9 +140,7 @@ export function Contracts({ project, focusId, onFocusHandled }: { project: Proje
                   {finance && <Td className="text-right font-mono whitespace-nowrap">{formatQAR(k.contract_value)}</Td>}
                   <Td><StatusBadge status={k.status} />{k.archived_at && <Badge tone="rose">Archived</Badge>}</Td>
                   <Td className="text-xs whitespace-nowrap">{k.attachment_count} file{k.attachment_count === 1 ? '' : 's'}{k.amendment_count > 0 && ` · ${k.amendment_count} amendment${k.amendment_count === 1 ? '' : 's'}`}</Td>
-                  {finance && <Td className="text-right text-xs whitespace-nowrap">{k.payments && k.payments.milestoneCount > 0
-                    ? <><div className="text-sky-700">Paid {formatQAR(k.payments.paid)}</div><div className="text-amber-800">Pending {formatQAR(k.payments.pending)}</div></>
-                    : <span className="text-slate-400">None linked</span>}</Td>}
+                  {finance && <Td className="text-right text-xs whitespace-nowrap"><ContractFinanceCell f={k.payments} /></Td>}
                   <Td><ChevronRight className="w-4 h-4 text-slate-400" aria-hidden="true" /></Td>
                 </tr>
               ))}
@@ -162,7 +161,7 @@ export function Contracts({ project, focusId, onFocusHandled }: { project: Proje
                     {finance && <span>Value {formatQAR(k.contract_value)}</span>}
                     <span>{k.attachment_count} file{k.attachment_count === 1 ? '' : 's'}</span>
                     {k.amendment_count > 0 && <span>{k.amendment_count} amendment{k.amendment_count === 1 ? '' : 's'}</span>}
-                    {finance && k.payments && k.payments.milestoneCount > 0 && <span>Paid {formatQAR(k.payments.paid)} · Pending {formatQAR(k.payments.pending)}</span>}
+                    {finance && <ContractFinanceInline f={k.payments} />}
                     {k.archived_at && <Badge tone="rose">Archived</Badge>}
                   </div>
                 </button>
@@ -287,29 +286,31 @@ function ContractDetails({ project, id, writable, onClose, onEdit, onAmend, onCh
           </section>
 
           {k.payments && (
+            <section aria-labelledby="contract-finance-h">
+              <h3 id="contract-finance-h" className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">Contract finance</h3>
+              <ContractFinancePanel f={k.payments.summary} />
+            </section>
+          )}
+
+          {k.payments && (
             <section aria-labelledby="contract-payments">
-              <h3 id="contract-payments" className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">Linked payments</h3>
+              <h3 id="contract-payments" className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">Linked payment milestones</h3>
               {k.payments.milestones.length === 0 ? (
-                <p className="text-xs text-slate-500">No payment milestones reference this contract. Link one from the Payments page (edit a milestone → Contract).</p>
+                <p className="text-xs text-slate-500">No payment schedule yet — no milestones reference this contract. Link one from the Payments page (edit a milestone → Contract).</p>
               ) : (
                 <>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3 text-sm">
-                    <Mini label="Scheduled" value={formatQAR(k.payments.summary.scheduled)} />
-                    <Mini label="Paid (actual transfers)" value={formatQAR(k.payments.summary.paid)} tone="text-sky-700" />
-                    <Mini label="Pending" value={formatQAR(k.payments.summary.pending)} tone="text-amber-800" />
-                  </div>
                   <ul className="divide-y divide-slate-100 border border-slate-200 rounded-lg bg-white">
                     {k.payments.milestones.map((m) => (
                       <li key={m.id} className={m.archived_at ? 'opacity-60' : ''}>
                         <a href={`#/payments/${project.id}/${m.id}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 no-underline hover:bg-slate-50">
                           <span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-slate-900 break-words">{m.description}</span><span className="block text-[11px] text-slate-500">{m.payee_name} · due {formatDate(m.due_date)}</span></span>
-                          <span className="text-xs font-mono text-right"><span className="block">{formatQAR(m.balance.scheduled)}</span><span className="block text-sky-700">paid {formatQAR(m.balance.paid)}</span></span>
+                          <span className="text-xs font-mono text-right"><span className="block">{formatQAR(m.balance.scheduled)}</span><span className="block text-sky-700">paid {formatQAR(m.balance.paid)}</span>{m.balance.pending > 0 && !m.archived_at && <span className="block text-amber-800">unpaid {formatQAR(m.balance.pending)}</span>}</span>
                           <StatusBadge status={m.balance.derivedStatus} />{m.archived_at && <Badge tone="rose">Archived</Badge>}
                         </a>
                       </li>
                     ))}
                   </ul>
-                  <p className="text-[11px] text-slate-500 mt-1">Totals exclude archived milestones and use the same balances as the Payments page.</p>
+                  <p className="text-[11px] text-slate-500 mt-1">Scheduled unpaid leaves out archived and cancelled milestones and uses the same balances as the Payments page. Transfers on archived milestones still count as paid.</p>
                 </>
               )}
             </section>
@@ -322,7 +323,4 @@ function ContractDetails({ project, id, writable, onClose, onEdit, onAmend, onCh
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div className="min-w-0"><dt className="text-[11px] font-semibold text-slate-500">{label}</dt><dd className="text-slate-800 break-words">{children}</dd></div>;
-}
-function Mini({ label, value, tone = 'text-slate-900' }: { label: string; value: string; tone?: string }) {
-  return <div className="border border-slate-200 rounded-lg px-3 py-2 bg-white"><div className="text-[11px] text-slate-500">{label}</div><div className={`font-mono font-semibold ${tone}`}>{value}</div></div>;
 }

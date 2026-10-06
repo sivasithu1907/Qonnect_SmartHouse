@@ -80,7 +80,7 @@ describe('contract register', () => {
     const list = (await pm.get(P1 + '/contracts')).body;
     expect(list.contracts).toHaveLength(1);
     expect(list.contracts[0]).toMatchObject({ title: 'Main construction agreement', category_name: 'Main Contractor', contract_value: 509500, status: 'Signed', attachment_count: 0, amendment_count: 0 });
-    expect(list.contracts[0].payments).toEqual({ milestoneCount: 0, scheduled: 0, paid: 0, pending: 0, overdueCount: 0 });
+    expect(list.contracts[0].payments).toMatchObject({ milestoneCount: 0, scheduled: 0, paid: 0, scheduledUnpaid: 0, overdueCount: 0, linkedMilestoneCount: 0 });
   });
 
   it('validates fields and rejects categories or budget items from another project', async () => {
@@ -249,14 +249,14 @@ describe('payment milestone links', () => {
     expect(pay.contract_title).toBe('Main construction agreement');
   });
 
-  it('contract details show linked payments with the existing paid / pending balances', async () => {
+  it('contract details show paid, remaining contract balance and scheduled unpaid separately', async () => {
     expect((await pm.post(`${P1}/payments/milestones/${milestoneId}/transactions`, { amount: 20000, paid_date: '2026-09-15', method: 'bank_transfer', reference: 'TRF-77' })).status).toBe(201);
     const d = (await pm.get(`${P1}/contracts/${contractId}`)).body;
-    expect(d.payments.summary).toEqual({ milestoneCount: 1, scheduled: 50000, paid: 20000, pending: 30000, overdueCount: 0 });
+    expect(d.payments.summary).toMatchObject({ contractValue: 510000, milestoneCount: 1, scheduled: 50000, paid: 20000, remaining: 490000, scheduledUnpaid: 30000, notYetScheduled: 460000, overpaid: 0, overdueCount: 0 });
     expect(d.payments.milestones).toHaveLength(1);
     expect(d.payments.milestones[0]).toMatchObject({ id: milestoneId, description: 'Advance payment', balance: { paid: 20000, pending: 30000, derivedStatus: 'Partially paid' } });
     const list = (await viewer.get(P1 + '/contracts')).body.contracts.find((k: { id: string }) => k.id === contractId);
-    expect(list.payments).toMatchObject({ milestoneCount: 1, paid: 20000, pending: 30000 });
+    expect(list.payments).toMatchObject({ milestoneCount: 1, paid: 20000, remaining: 490000, scheduledUnpaid: 30000 });
     // the contract value is untouched by payments and payments are untouched by the value
     expect(d.contract_value).toBe(510000);
     const ms = await ctx.pool.query('SELECT scheduled_amount FROM payment_milestones WHERE id = $1', [milestoneId]);

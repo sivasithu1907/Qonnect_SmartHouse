@@ -20,7 +20,7 @@ import { audit, diff } from '../audit';
 import { assertSameProject, getOwned, insertRow, patchOwned } from '../lib/crud';
 import { can } from '../permissions';
 import { CONTRACT_STATUSES } from '../../shared/constants';
-import { sumMoney } from '../../shared/calc';
+import { contractFinance } from '../../shared/contractFinance';
 import { loadPayments } from './payments';
 
 const uuidOrNull = z.preprocess((v) => (v === '' ? null : v), z.string().uuid().nullable());
@@ -82,17 +82,11 @@ async function loadContracts(db: pg.Pool | pg.PoolClient, pid: string, includeAr
 type PaymentsData = Awaited<ReturnType<typeof loadPayments>>;
 type Milestone = PaymentsData['milestones'][number];
 
-/** Totals use the same balances as the Payments page; archived milestones are excluded. */
-function paymentSummary(ms: Milestone[]) {
-  const live = ms.filter((m) => !m.archived_at);
-  return {
-    milestoneCount: live.length,
-    scheduled: sumMoney(live.filter((m) => m.status !== 'cancelled').map((m) => m.scheduled_amount as number)),
-    paid: sumMoney(live.map((m) => m.balance.paid)),
-    pending: sumMoney(live.map((m) => m.balance.pending)),
-    overdueCount: live.filter((m) => m.balance.isOverdue).length,
-  };
-}
+/**
+ * Contract finance for one contract from its explicitly linked milestones (archived included, so
+ * money already paid is never dropped). See shared/contractFinance.ts for the definitions.
+ */
+const financeFor = (k: Record<string, any>, linked: Milestone[]) => contractFinance(k.contract_value, linked);
 
 async function assertCategory(c: pg.PoolClient, pid: string, categoryId: string, isNewChoice: boolean) {
   await assertSameProject(c, 'contract_categories', pid, categoryId, 'Contract category');
@@ -111,14 +105,14 @@ export function contractRoutes(pool: pg.Pool, timeZone: string) {
     const rows = await loadContracts(pool, pid, req.query.includeArchived === '1');
     const byContract = new Map<string, Milestone[]>();
     if (a.finance) {
-      const p = await loadPayments(pool, pid, timeZone);
+      const p = await loadPayments(pool, pid, timeZone, true); // archived milestones too: their transfers stay paid
       for (const m of p.milestones) {
         if (!m.contract_id) continue;
         byContract.set(m.contract_id, [...(byContract.get(m.contract_id) ?? []), m]);
       }
     }
     res.json({
-      contracts: rows.map((k) => redactContract({ ...k, payments: paymentSummary(byContract.get(k.id) ?? []) }, a)),
+      contracts: rows.map((k) => redactContract({ ...k, payments: financeFor(k, byContract.get(k.id) ?? []) }, a)),
       access: a,
     });
   });
@@ -138,12 +132,12 @@ export function contractRoutes(pool: pg.Pool, timeZone: string) {
         ORDER BY x.amendment_date, x.created_at`,
       [pid, id],
     );
-    let payments: { summary: ReturnType<typeof paymentSummary>; milestones: unknown[] } | undefined;
+    let payments: { summary: ReturnType<typeof financeFor>; milestones: unknown[] } | undefined;
     if (a.finance) {
       const p = await loadPayments(pool, pid, timeZone, true);
       const linked = p.milestones.filter((m) => m.contract_id === id);
       payments = {
-        summary: paymentSummary(linked),
+        summary: financeFor(k, linked),
         milestones: linked.map((m) => ({
           id: m.id, payee_name: m.payee_name, description: m.description, due_date: m.due_date, status: m.status,
           scheduled_amount: m.scheduled_amount, archived_at: m.archived_at, balance: m.balance,

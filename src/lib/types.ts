@@ -80,7 +80,8 @@ export interface WorkUpdate { id: string; update_date: string; title: string; de
 
 export interface AuditEntry { id: number; action: string; entity_type: string; entity_id: string | null; summary: string; before: any; after: any; user_email: string | null; created_at: string }
 
-export interface ContractPaymentSummary { milestoneCount: number; scheduled: number; paid: number; pending: number; overdueCount: number }
+/** Contract finance (shared/contractFinance.ts): paid, remaining contract balance, scheduled unpaid … */
+export type ContractPaymentSummary = import('../../shared/contractFinance').ContractFinance;
 export interface Contract {
   id: string; title: string; category_id: string; category_name: string; category_sort: number; company_name: string; reference: string;
   signed_date: string | null; status: string; notes: string; drive_url: string; archived_at: string | null;
