@@ -9,6 +9,7 @@ import { CONSULTANT_VISIT_STATUSES } from '../../shared/constants';
 import { Attachments } from '../components/Attachments';
 import { VisitActions } from '../components/VisitActions';
 import { Badge, Button, Card, EmptyState, LinkButton, Modal, Notice, PageHeader, RecordForm, Spinner, StatusBadge, useUi, type FieldSpec, type Option } from '../components/ui';
+import { DirectoryLinkBadge, useDirectoryLink } from '../components/directory/DirectoryLink';
 import { labelOf, materialOptions as materialOpts, timelineTaskOptions } from '../lib/options';
 
 export function useLinkOptions(projectId: string) {
@@ -32,6 +33,7 @@ export function ConsultantVisits({ project, focusId, onFocusHandled }: { project
   const { data: members } = useApi<Member[]>(manager ? `/api/projects/${project.id}/members` : null);
   const { taskOptions, materialOptions, label } = useLinkOptions(project.id);
   const { toast, confirm } = useUi();
+  const dir = useDirectoryLink(project);
   const [edit, setEdit] = useState<{ row: ConsultantVisit | null } | null>(null);
   useFocusRecord(focusId, data, (v) => v.id, (v) => setEdit({ row: v }), onFocusHandled);
 
@@ -43,6 +45,7 @@ export function ConsultantVisits({ project, focusId, onFocusHandled }: { project
     { name: 'planned_at', label: 'Planned date & time', type: 'datetime' },
     { name: 'status', label: 'Visit status', type: 'select', options: CONSULTANT_VISIT_STATUSES.map((s) => ({ value: s, label: s })) },
     { name: 'consultant_name', label: 'Consultant name / company' },
+    ...(manager ? dir.fields(edit?.row ? data.find((x) => x.id === edit.row!.id) ?? edit.row : null, { label: 'Directory consultant', help: 'Optional. Entries assigned to this project in Contacts. Separate from the consultant user below; the name above is kept as typed.' }) : []),
     { name: 'consultant_user_id', label: 'Consultant user (can edit this visit)', type: 'select', nullable: true, hidden: !manager, options: (members ?? []).filter((m) => m.role === 'consultant').map((m) => ({ value: m.id, label: m.name })) },
     { name: 'purpose', label: 'Purpose', required: true, wide: true },
     { name: 'areas_inspected', label: 'Areas inspected', type: 'textarea' },
@@ -83,6 +86,7 @@ export function ConsultantVisits({ project, focusId, onFocusHandled }: { project
                       {v.attachment_count > 0 && <Badge tone="sky">{v.attachment_count} file(s)</Badge>}
                     </div>
                     <div className="text-xs text-slate-500 mt-0.5">{formatDateTime(v.planned_at, 'Date not set')} · {v.consultant_name || v.consultant_user_name || 'Consultant not set'}{v.areas_inspected && ` · ${v.areas_inspected}`}</div>
+                    <DirectoryLinkBadge row={v} className="mt-0.5" />
                     {v.observations && <p className="text-xs text-slate-700 mt-1 line-clamp-2">{v.observations}</p>}
                     <div className="text-[11px] text-slate-400 mt-1">
                       {v.next_visit_date && `Next visit ${formatDate(v.next_visit_date)} · `}
@@ -115,11 +119,13 @@ export function ConsultantVisits({ project, focusId, onFocusHandled }: { project
                   f.type === 'datetime' ? formatDateTime((current as any)[f.name]) : f.type === 'date' ? formatDate((current as any)[f.name]) : f.type === 'select' && f.options ? (label(f.options, (current as any)[f.name]) || (current as any)[f.name] || '—') : ((current as any)[f.name] || '—')}</dd></div>)}
               </dl>
             )}
+            {current && !canWrite(current) && <DirectoryLinkBadge row={current} />}
             {current && <VisitActions base={base} type="consultant" visitId={current.id} actions={current.actions ?? []} canEdit={canWrite(current)} onChange={reload} />}
             {current && <Attachments projectId={project.id} entityType="consultant_visit" entityId={current.id} defaultKind="consultant_report" canUpload={canWrite(current)} onChange={reload} />}
           </div>
         )}
       </Modal>
+      {dir.dialog}
       <RestoreArchived base={`${base}/consultant`} onDone={reload} canRestore={manager} />
     </div>
   );

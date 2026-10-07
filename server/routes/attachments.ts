@@ -63,7 +63,7 @@ export function contentDisposition(type: 'inline' | 'attachment', name: string):
   return `${type}; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
 
-async function storedTypeMatches(full: string, mime: string, originalName: string): Promise<boolean> {
+export async function storedTypeMatches(full: string, mime: string, originalName: string): Promise<boolean> {
   const fh = await fs.promises.open(full, 'r');
   try {
     const head = Buffer.alloc(16);
@@ -206,7 +206,8 @@ export function attachmentRoutes(pool: pg.Pool, cfg: AppConfig) {
   r.get('/:id/download', async (req, res) => {
     const id = uuidParam(req, 'id');
     const a = await getOwned<Record<string, string>>(pool, 'attachments', req.project!.id, id);
-    if (a.archived_at) throw notFound();
+    // directory documents have their own scoped routes (/api/directory/...), never this one
+    if (a.archived_at || !(ATTACHMENT_ENTITY_TYPES as readonly string[]).includes(a.entity_type)) throw notFound();
     await assertEntityAccess(pool, req, a.entity_type as AttachmentEntityType, a.entity_id, 'read');
     const full = path.join(cfg.uploadDir, req.project!.id, path.basename(a.stored_name));
     let stat: fs.Stats;
@@ -235,6 +236,7 @@ export function attachmentRoutes(pool: pg.Pool, cfg: AppConfig) {
     const pid = req.project!.id;
     const out = await withTx(pool, async (c) => {
       const a = await getOwned<Record<string, string>>(c, 'attachments', pid, id, { forUpdate: true });
+      if (!(ATTACHMENT_ENTITY_TYPES as readonly string[]).includes(a.entity_type)) throw notFound();
       await assertEntityAccess(c, req, a.entity_type as AttachmentEntityType, a.entity_id, 'write');
       // the original signed agreement is kept: only an admin can archive a signed-contract file
       if (a.kind === 'signed_contract' && !can(req.user!.role, 'projects.manage')) {

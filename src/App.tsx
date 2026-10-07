@@ -19,13 +19,14 @@ import { SiteVisits } from './pages/SiteVisits';
 import { Timeline } from './pages/Timeline';
 import { AuditLog } from './pages/AuditLog';
 import { Contracts } from './pages/Contracts';
+import { Contacts } from './pages/Contacts';
 import { UsersAdmin } from './pages/UsersAdmin';
 import { NotificationSettings } from './pages/NotificationSettings';
 import { UpdateBanner } from './components/UpdateBanner';
 import { InstallAppDialog } from './components/InstallApp';
 import { detachDeviceOnLogout, syncSubscription } from './lib/push';
 
-const SECTIONS: Section[] = ['portfolio', 'dashboard', 'budget', 'payments', 'contracts', 'materials', 'consultant', 'site', 'timeline', 'audit', 'users', 'notifications'];
+const SECTIONS: Section[] = ['portfolio', 'dashboard', 'budget', 'payments', 'contracts', 'materials', 'consultant', 'site', 'timeline', 'contacts', 'audit', 'users', 'notifications'];
 const UUID = /^[0-9a-f-]{36}$/i;
 const FOCUS_FILTER = /^filter:[a-z-]{1,40}$/; // e.g. #/materials/<project>/filter:no-date
 
@@ -177,6 +178,7 @@ function Shell() {
             {section === 'consultant' && <ConsultantVisits project={current} {...focusProps} />}
             {section === 'site' && <SiteVisits project={current} {...focusProps} />}
             {section === 'timeline' && <Timeline project={current} {...focusProps} />}
+            {section === 'contacts' && <Contacts project={current} {...focusProps} />}
             {section === 'audit' && <AuditLog project={current} />}
           </React.Fragment>
         )}

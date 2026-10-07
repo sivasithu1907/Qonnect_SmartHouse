@@ -22,6 +22,7 @@ import { can } from '../permissions';
 import { CONTRACT_STATUSES } from '../../shared/constants';
 import { contractFinance } from '../../shared/contractFinance';
 import { loadPayments } from './payments';
+import { checkDirectoryLinks, directoryJoin, directoryLinkFields, directorySelect } from '../lib/directoryLinks';
 
 const uuidOrNull = z.preprocess((v) => (v === '' ? null : v), z.string().uuid().nullable());
 
@@ -36,6 +37,7 @@ const contractSchema = z.object({
   notes: zText(4000).default(''),
   drive_url: zUrl.default(''),
   budget_item_id: uuidOrNull.optional(),
+  ...directoryLinkFields,
 });
 
 const amendmentSchema = z.object({
@@ -65,13 +67,14 @@ export function redactContract<T extends Record<string, unknown>>(row: T, a: Acc
 async function loadContracts(db: pg.Pool | pg.PoolClient, pid: string, includeArchived: boolean, id?: string) {
   const { rows } = await db.query(
     `SELECT k.*, cc.name AS category_name, cc.sort_order AS category_sort, bi.name AS budget_item_name,
-            u.name AS created_by_name,
+            u.name AS created_by_name, ${directorySelect('k')},
             (SELECT count(*)::int FROM attachments a WHERE a.project_id = k.project_id AND a.entity_type = 'contract' AND a.entity_id = k.id AND a.archived_at IS NULL) AS attachment_count,
             (SELECT count(*)::int FROM contract_amendments x WHERE x.contract_id = k.id AND x.archived_at IS NULL) AS amendment_count
        FROM contracts k
        JOIN contract_categories cc ON cc.id = k.category_id
        LEFT JOIN budget_items bi ON bi.id = k.budget_item_id AND bi.project_id = k.project_id
        LEFT JOIN users u ON u.id = k.created_by
+       ${directoryJoin('k')}
       WHERE k.project_id = $1 AND ($2 OR k.archived_at IS NULL) AND ($3::uuid IS NULL OR k.id = $3)
       ORDER BY cc.sort_order, k.signed_date DESC NULLS LAST, k.created_at DESC`,
     [pid, includeArchived, id ?? null],
@@ -154,6 +157,7 @@ export function contractRoutes(pool: pg.Pool, timeZone: string) {
     const row = await withTx(pool, async (c) => {
       await assertCategory(c, pid, body.category_id, true);
       await assertSameProject(c, 'budget_items', pid, body.budget_item_id, 'Budget item');
+      await checkDirectoryLinks(c, pid, body);
       const k = await insertRow(c, 'contracts', {
         ...body, signed_date: body.signed_date ?? null, contract_value: body.contract_value ?? null,
         budget_item_id: body.budget_item_id ?? null, project_id: pid, created_by: req.user!.id,
@@ -173,6 +177,7 @@ export function contractRoutes(pool: pg.Pool, timeZone: string) {
       const cur = await getOwned<Record<string, unknown>>(c, 'contracts', pid, id, { forUpdate: true });
       if (body.category_id) await assertCategory(c, pid, body.category_id, body.category_id !== cur.category_id);
       if (body.budget_item_id) await assertSameProject(c, 'budget_items', pid, body.budget_item_id, 'Budget item');
+      await checkDirectoryLinks(c, pid, body as Record<string, unknown>, cur as never);
       const { before, after } = await patchOwned(c, 'contracts', pid, id, body);
       const d = diff(before, after);
       await audit(c, req, { projectId: pid, action: 'update', entityType: 'contract', entityId: id, summary: `Edited contract "${after.title}" (${d.changed.join(', ')})`, before: d.before, after: d.after });

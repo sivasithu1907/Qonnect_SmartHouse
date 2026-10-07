@@ -21,6 +21,7 @@ import { notificationRoutes } from './routes/notifications';
 import { Notifier } from './notify/notifier';
 import { createWebPushSender, type PushSender } from './notify/push';
 import { attachmentRoutes } from './routes/attachments';
+import { directoryRoutes, projectDirectoryRoute } from './routes/directory';
 import { contractRoutes } from './routes/contracts';
 import { prerequisiteRoutes } from './routes/prerequisites';
 import { dashboardRoutes, portfolioRoute } from './routes/dashboard';
@@ -71,6 +72,7 @@ export function createApp(pool: pg.Pool, cfg: AppConfig, opts: AppOptions = {}) 
   app.use('/api/portfolio', requireAuth, portfolioRoute(pool, cfg.timeZone));
   app.use('/api/notifications', requireAuth, notificationRoutes(pool, cfg, notifier));
   app.use('/api/projects', requireAuth, projectCollectionRoutes(pool));
+  app.use('/api/directory', requireAuth, directoryRoutes(pool, cfg));
 
   const project = express.Router({ mergeParams: true });
   project.use('/budget', budgetRoutes(pool));
@@ -83,6 +85,7 @@ export function createApp(pool: pg.Pool, cfg: AppConfig, opts: AppOptions = {}) 
   project.use('/timeline', timelineRoutes(pool, notifier));
   project.use('/work-updates', workUpdateRoutes(pool));
   project.use('/attachments', attachmentRoutes(pool, cfg));
+  project.use('/directory', projectDirectoryRoute(pool));
   project.use('/', dashboardRoutes(pool, cfg.timeZone));
   project.use('/', projectItemRoutes(pool));
   app.use('/api/projects/:projectId', requireAuth, projectScope(pool), project);
@@ -136,7 +139,7 @@ export function createApp(pool: pg.Pool, cfg: AppConfig, opts: AppOptions = {}) 
   return app;
 }
 
-const PREVIEW_PATH = /^\/api\/projects\/[^/]+\/attachments\/[^/]+\/download$/;
+const PREVIEW_PATH = /^\/api\/(projects\/[^/]+\/attachments|directory\/[^/]+\/documents)\/[^/]+\/download$/;
 function isFilePreviewNavigation(req: Request): boolean {
   return req.method === 'GET' && req.query.inline === '1' && PREVIEW_PATH.test(req.path) && req.accepts(['json', 'html']) === 'html';
 }

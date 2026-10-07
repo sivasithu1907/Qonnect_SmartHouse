@@ -10,6 +10,7 @@ import { todayLocalISO } from '../lib/format';
 import { INSPECTION_STATUSES, MATERIAL_STATUSES, SUPPLY_RESPONSIBILITIES, SUPPLY_RESPONSIBILITY_LABELS } from '../../shared/constants';
 import { Attachments } from '../components/Attachments';
 import { Badge, Button, Card, EmptyState, inputCls, Kpi, LinkButton, Modal, NeedsConfirmation, Notice, PageHeader, RecordForm, Spinner, StatusBadge, Tabs, useUi, type FieldSpec } from '../components/ui';
+import { DirectoryLinkBadge, useDirectoryLink } from '../components/directory/DirectoryLink';
 import { MaterialSchedule } from '../components/schedule/MaterialSchedule';
 import { MaterialDateSummary } from '../components/schedule/ScheduleMarks';
 import { DateReviewPanel, PreviousDateDetails, ScheduleWarningList } from '../components/materials/MaterialScheduleParts';
@@ -45,6 +46,7 @@ export function Materials({ project, focusId, onFocusHandled }: { project: Proje
   const manageCats = can('categories.manage') && !project.archived_at;
   const [catsOpen, setCatsOpen] = useState(false);
   const { toast, confirm } = useUi();
+  const dir = useDirectoryLink(project);
   const [edit, setEdit] = useState<{ row: MaterialItem | null } | null>(null);
   // #/materials/<project>/filter:<name> (dashboard links) opens a quick filter; a record id opens that line
   const linkedFilter = quickFilterFromFocus(focusId);
@@ -112,6 +114,7 @@ export function Materials({ project, focusId, onFocusHandled }: { project: Proje
       { name: 'supply_responsibility', label: 'Supply responsibility', type: 'select', options: SUPPLY_RESPONSIBILITIES.map((r) => ({ value: r, label: SUPPLY_RESPONSIBILITY_LABELS[r] })) },
       { name: 'responsibility_note', label: 'Responsibility note', wide: true },
       { name: 'vendor', label: 'Contractor / vendor' },
+      ...(full ? dir.fields(row, { label: 'Directory supplier / contractor', help: 'Optional. Entries assigned to this project in Contacts. The vendor name above is kept as typed; dates and status do not change.' }) : []),
       { name: 'assigned_contractor_id', label: 'Assigned contractor user (can update this line)', type: 'select', nullable: true, options: contractors.map((c) => ({ value: c.id, label: c.name })), hidden: !full },
       { name: 'status', label: 'Status', type: 'select', options: MATERIAL_STATUSES.map((s) => ({ value: s, label: s })) },
       // ---- owner supply: delivery schedule
@@ -250,7 +253,7 @@ export function Materials({ project, focusId, onFocusHandled }: { project: Proje
                     <div className="space-y-2 border border-slate-200 rounded-lg p-3">
                       <div className="flex flex-wrap items-center gap-1.5"><StatusBadge status={row.status} />
                         {row.supply_responsibility === 'needs_confirmation' ? <NeedsConfirmation /> : <Badge tone={row.supply_responsibility === 'owner' ? 'sky' : 'indigo'}>{SUPPLY_RESPONSIBILITY_LABELS[row.supply_responsibility]}</Badge>}
-                        {row.vendor && <span className="text-xs text-slate-600">Vendor: {row.vendor}</span>}</div>
+                        {row.vendor && <span className="text-xs text-slate-600">Vendor: {row.vendor}</span>}<DirectoryLinkBadge row={row} /></div>
                       <MaterialDateSummary m={row} />
                     </div>
                   )}
@@ -262,6 +265,7 @@ export function Materials({ project, focusId, onFocusHandled }: { project: Proje
         })()}
       </Modal>
 
+      {dir.dialog}
       <Modal open={!!scopeEdit} onClose={() => setScopeEdit(null)} title={`Scope notes — ${scopeEdit?.category.name ?? ''}`}>
         {scopeEdit && (
           <RecordForm initial={scopeEdit.row} mode={scopeEdit.row ? 'edit' : 'create'}

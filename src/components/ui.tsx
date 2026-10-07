@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { createPortal } from 'react-dom';
 import { AlertTriangle, Check, CheckCircle2, ChevronDown, ExternalLink, Info, Loader2, X } from 'lucide-react';
 import { fromLocalInput, toLocalInput } from '../lib/format';
+import { DEFAULT_COUNTRY, PHONE_COUNTRIES } from '../../shared/directory';
 
 // ------------------------------------------------------------------ primitives
 type Variant = 'primary' | 'secondary' | 'danger' | 'ghost' | 'success';
@@ -164,23 +165,31 @@ function unlockBodyScroll() {
  * the dialog, and the page behind it cannot scroll while it is open. Forms rendered with
  * RecordForm keep their Save / Cancel bar pinned to the bottom of the dialog.
  */
-export function Modal({ open, title, onClose, children, wide, subtitle }: { open: boolean; title: string; subtitle?: string; onClose: () => void; children: React.ReactNode; wide?: boolean }) {
+// Open dialogs, top-most last: Escape closes only the top one, so a dialog opened over a form never
+// closes (and loses) the form underneath.
+const modalStack: symbol[] = [];
+
+export function Modal({ open, title, onClose, children, wide, subtitle, portal }: { open: boolean; title: string; subtitle?: string; onClose: () => void; children: React.ReactNode; wide?: boolean; /** render into document.body (for a dialog opened from inside another dialog) */ portal?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   useEffect(() => {
     if (!open) return;
     lockBodyScroll();
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && closeRef.current();
+    const me = Symbol('modal');
+    modalStack.push(me);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && modalStack[modalStack.length - 1] === me) closeRef.current(); };
     document.addEventListener('keydown', onKey);
     ref.current?.querySelector<HTMLElement>('[data-autofocus],input:not([type=hidden]),select,textarea,button:not([aria-label=Close])')?.focus();
     return () => {
       document.removeEventListener('keydown', onKey);
+      const i = modalStack.indexOf(me);
+      if (i >= 0) modalStack.splice(i, 1);
       unlockBodyScroll();
     };
   }, [open]);
   if (!open) return null;
-  return (
+  const dialog = (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-6 bg-slate-900/40 backdrop-blur-[1px]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div ref={ref} role="dialog" aria-modal="true" aria-label={title}
         className={`w-full ${wide ? 'max-w-4xl' : 'max-w-xl'} max-h-full flex flex-col bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden`}>
@@ -195,6 +204,7 @@ export function Modal({ open, title, onClose, children, wide, subtitle }: { open
       </div>
     </div>
   );
+  return portal && typeof document !== 'undefined' ? createPortal(dialog, document.body) : dialog;
 }
 
 interface ConfirmOpts { title?: string; confirmLabel?: string; danger?: boolean }
@@ -249,7 +259,7 @@ export interface Option {
   /** an existing link to a record that is no longer offered for new selections */
   archived?: boolean;
 }
-export type FieldType = 'searchselect' | 'password' | 'text' | 'textarea' | 'number' | 'money' | 'date' | 'datetime' | 'select' | 'checkbox' | 'url' | 'multiselect' | 'section' | 'custom';
+export type FieldType = 'searchselect' | 'password' | 'text' | 'textarea' | 'number' | 'money' | 'date' | 'datetime' | 'select' | 'checkbox' | 'url' | 'multiselect' | 'section' | 'custom' | 'phone' | 'checklist';
 export interface FieldSpec {
   name: string;
   label: string;
@@ -269,6 +279,10 @@ export interface FieldSpec {
   searchPlaceholder?: string;
   /** shown only while this returns true for the current form values; a hidden field keeps its value and is never cleared */
   showWhen?: (vals: Record<string, any>) => boolean;
+  /** options computed from the current form values (e.g. contacts of the selected company) */
+  optionsFn?: (vals: Record<string, any>) => Option[];
+  /** reset this field to empty when the named field changes */
+  dependsOn?: string;
   /** type 'custom': renders arbitrary content from the current form values (no value of its own) */
   render?: (vals: Record<string, any>, set: (k: string, v: any) => void) => React.ReactNode;
 }
@@ -277,7 +291,7 @@ type Values = Record<string, any>;
 function toInput(f: FieldSpec, v: any): any {
   const t = f.type ?? 'text';
   if (t === 'checkbox') return !!v;
-  if (t === 'multiselect') return Array.isArray(v) ? v : [];
+  if (t === 'multiselect' || t === 'checklist') return Array.isArray(v) ? v : [];
   if (t === 'datetime') return toLocalInput(v);
   if (v === null || v === undefined) return '';
   return String(v);
@@ -285,7 +299,7 @@ function toInput(f: FieldSpec, v: any): any {
 function fromInput(f: FieldSpec, v: any): any {
   const t = f.type ?? 'text';
   if (t === 'checkbox') return !!v;
-  if (t === 'multiselect') return v;
+  if (t === 'multiselect' || t === 'checklist') return v;
   if (t === 'number' || t === 'money') return v === '' ? null : Number(v);
   if (t === 'date') return v === '' ? null : v;
   if (t === 'datetime') return fromLocalInput(v);
@@ -467,6 +481,33 @@ export function SearchSelect({ id, value, onChange, options, disabled, nullable,
   );
 }
 
+/**
+ * Phone field: country code (Qatar +974 by default, any +code allowed) and the number as typed.
+ * The value is one readable string such as "+974 5512 3456"; matching uses a normalized copy.
+ */
+export function PhoneInput({ id, value, onChange, disabled }: { id?: string; value: string; onChange: (v: string) => void; disabled?: boolean }) {
+  const parse = (v: string) => {
+    const m = /^\+(\d{1,4})\s+(.*)$/.exec(v.trim());
+    if (m && PHONE_COUNTRIES.some((c) => c.code === m[1])) return { code: m[1], rest: m[2] };
+    if (v.trim().startsWith('+')) return { code: 'other', rest: v.trim() };
+    return { code: DEFAULT_COUNTRY, rest: v.trim() };
+  };
+  const [code, setCode] = useState(() => parse(value ?? '').code);
+  const rest = parse(value ?? '').code === code ? parse(value ?? '').rest : (value ?? '').replace(/^\+\d{1,4}\s+/, '');
+  const emit = (c: string, r: string) => onChange(r.trim() === '' ? '' : c === 'other' ? r.trim() : `+${c} ${r.trim()}`);
+  return (
+    <div className="flex gap-2">
+      <select aria-label="Country code" className={`${inputCls} !w-auto shrink-0`} value={code} disabled={disabled}
+        onChange={(e) => { setCode(e.target.value); emit(e.target.value, rest); }}>
+        {PHONE_COUNTRIES.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
+        <option value="other">Other (+code)</option>
+      </select>
+      <input id={id} type="tel" inputMode="tel" autoComplete="tel" className={inputCls} value={rest} disabled={disabled}
+        placeholder={code === 'other' ? '+44 20 1234 5678' : code === '974' ? '5512 3456' : 'Number'} onChange={(e) => emit(code, e.target.value)} />
+    </div>
+  );
+}
+
 export const inputCls = 'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400 disabled:bg-slate-50 disabled:text-slate-500';
 
 /**
@@ -482,7 +523,11 @@ export function RecordForm({ fields, initial, onSubmit, onCancel, submitLabel = 
   const [vals, setVals] = useState<Values>(start);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const set = (k: string, v: any) => setVals((s) => ({ ...s, [k]: v }));
+  const set = (k: string, v: any) => setVals((s) => {
+    const next = { ...s, [k]: v };
+    for (const f of fields) if (f.dependsOn === k && s[k] !== v) next[f.name] = f.type === 'multiselect' || f.type === 'checklist' ? [] : '';
+    return next;
+  });
   const shown = (f: FieldSpec) => !f.showWhen || f.showWhen(vals);
 
   const submit = async (e: React.FormEvent) => {
@@ -490,7 +535,7 @@ export function RecordForm({ fields, initial, onSubmit, onCancel, submitLabel = 
     setErr(null);
     // only fields currently shown are validated
     for (const f of visible.filter(shown)) {
-      if (f.required && !f.disabled && (vals[f.name] === '' || vals[f.name] === null)) { setErr(`${f.label} is required`); return; }
+      if (f.required && !f.disabled && (vals[f.name] === '' || vals[f.name] === null || (Array.isArray(vals[f.name]) && !vals[f.name].length))) { setErr(`${f.label} is required`); return; }
       if (f.type === 'url' && vals[f.name] && !/^https?:\/\//i.test(vals[f.name])) { setErr(`${f.label} must start with https://`); return; }
     }
     const out: Values = {};
@@ -531,7 +576,7 @@ export function RecordForm({ fields, initial, onSubmit, onCancel, submitLabel = 
             );
           }
           if (t === 'custom') return <div key={f.name} className="sm:col-span-2">{f.render?.(vals, set)}</div>;
-          const wide = f.wide || t === 'textarea' || t === 'multiselect';
+          const wide = f.wide || t === 'textarea' || t === 'multiselect' || t === 'checklist';
           return (
             <div key={f.name} className={wide ? 'sm:col-span-2' : ''}>
               {t === 'checkbox' ? (
@@ -549,8 +594,23 @@ export function RecordForm({ fields, initial, onSubmit, onCancel, submitLabel = 
                       {f.nullable && <option value="">— None —</option>}
                       <OptionList options={f.options ?? []} />
                     </select>
+                  ) : t === 'phone' ? (
+                    <PhoneInput id={id} value={vals[f.name]} disabled={f.disabled} onChange={(v) => set(f.name, v)} />
+                  ) : t === 'checklist' ? (
+                    <div id={id} role="group" aria-label={f.label} className="flex flex-wrap gap-1.5">
+                      {(f.optionsFn ? f.optionsFn(vals) : f.options ?? []).map((o) => {
+                        const on = (vals[f.name] as string[]).includes(o.value);
+                        return (
+                          <label key={o.value} className={`inline-flex items-center gap-1.5 min-h-9 px-2.5 py-1 rounded-lg border text-xs cursor-pointer ${on ? 'bg-sky-50 border-sky-300 text-sky-800 font-semibold' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}>
+                            <input type="checkbox" className="rounded border-slate-300" checked={on} disabled={f.disabled}
+                              onChange={(e) => set(f.name, e.target.checked ? [...vals[f.name], o.value] : (vals[f.name] as string[]).filter((x) => x !== o.value))} />
+                            {o.label}
+                          </label>
+                        );
+                      })}
+                    </div>
                   ) : t === 'searchselect' ? (
-                    <SearchSelect id={id} value={vals[f.name]} disabled={f.disabled} nullable={f.nullable} options={f.options ?? []} onChange={(v) => set(f.name, v)}
+                    <SearchSelect id={id} value={vals[f.name]} disabled={f.disabled} nullable={f.nullable} options={f.optionsFn ? f.optionsFn(vals) : f.options ?? []} onChange={(v) => set(f.name, v)}
                       noneLabel={f.noneLabel} noMatchLabel={f.noMatchLabel} fallbackLabel={f.fallbackLabel} searchPlaceholder={f.searchPlaceholder} ariaLabel={f.label} />
                   ) : t === 'multiselect' ? (
                     <select id={id} multiple className={`${inputCls} h-32`} value={vals[f.name]} disabled={f.disabled}

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { PAGE_CONTAINER } from '../lib/layout';
 import {
-  Building2, CalendarDays, Check, ChevronDown, Coins, CreditCard, ExternalLink, FileSignature, FolderOpen, FolderPlus, FolderX, History, Layers, LayoutDashboard, LogOut,
+  BookUser, Building2, CalendarDays, Check, ChevronDown, Coins, CreditCard, ExternalLink, FileSignature, FolderOpen, FolderPlus, FolderX, History, Layers, LayoutDashboard, LogOut,
   MapPin, Menu, Plus, Settings, Truck, UserCheck, Users, X, KeyRound, Bell, Download,
 } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
@@ -64,6 +64,7 @@ export function Header({ section, onNavigate, projects, current, onSelectProject
     { id: 'consultant', label: 'Consultant Visits', icon: UserCheck, show: can('consultant.read') },
     { id: 'site', label: 'Site Visits', icon: MapPin, show: can('site.read') },
     { id: 'timeline', label: 'Timeline', icon: CalendarDays, show: can('timeline.read') },
+    { id: 'contacts', label: 'Contacts', icon: BookUser, show: can('directory.read') },
     { id: 'audit', label: 'Audit', icon: History, show: can('audit.read') },
   ];
   const go = (s: Section) => { onNavigate(s); setMobile(false); };

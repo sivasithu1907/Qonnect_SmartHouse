@@ -27,7 +27,10 @@ export type Capability =
   | 'contracts.write'      // add / edit / archive contracts, amendments and contract files
   | 'prerequisites.read'   // project prerequisites & documents checklist
   | 'prerequisites.write'  // add / edit / reorder / archive prerequisites, record decisions, attach files
-  | 'categories.manage';   // add / rename / reorder / archive / delete budget, material and contract categories
+  | 'categories.manage'    // add / rename / reorder / archive / delete budget, material and contract categories
+  | 'directory.read'       // Contacts: read entries available through the user's projects (admin / PM: whole directory)
+  | 'directory.create'     // Contacts: create entries, add contact people, assign to own projects, project documents
+  | 'directory.manage';    // Contacts: edit / archive shared identity and contacts, shared documents, any project
 
 const MATRIX: Record<Role, Capability[]> = {
   admin: [
@@ -35,17 +38,19 @@ const MATRIX: Record<Role, Capability[]> = {
     'materials.read', 'materials.write', 'consultant.read', 'consultant.write', 'site.read', 'site.write',
     'timeline.read', 'timeline.write', 'workupdates.write', 'audit.read', 'categories.manage',
     'contracts.read', 'contracts.write', 'prerequisites.read', 'prerequisites.write',
+    'directory.read', 'directory.create', 'directory.manage',
   ],
   project_manager: [
     'links.edit', 'budget.read', 'payments.read', 'payments.write', 'materials.read', 'materials.write',
     'consultant.read', 'consultant.write', 'site.read', 'site.write', 'timeline.read', 'timeline.write',
     'workupdates.write', 'audit.read', 'contracts.read', 'contracts.write',
-    'prerequisites.read', 'prerequisites.write',
+    'prerequisites.read', 'prerequisites.write', 'directory.read', 'directory.create',
   ],
   contractor: ['materials.read', 'materials.contractor', 'consultant.read', 'site.read', 'site.assigned', 'timeline.read', 'workupdates.write'],
   consultant: ['materials.read', 'consultant.read', 'consultant.own', 'site.read', 'site.assigned', 'timeline.read'],
   // Contractors and consultants do not see the contract register: it holds other parties' agreements and values.
-  viewer: ['budget.read', 'payments.read', 'materials.read', 'consultant.read', 'site.read', 'timeline.read', 'contracts.read', 'prerequisites.read'],
+  // Contractors and consultants get no directory access: it holds other parties' contact details.
+  viewer: ['budget.read', 'payments.read', 'materials.read', 'consultant.read', 'site.read', 'timeline.read', 'contracts.read', 'prerequisites.read', 'directory.read'],
 };
 
 export function can(role: Role, cap: Capability): boolean {

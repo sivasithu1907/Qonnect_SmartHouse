@@ -9,6 +9,7 @@ import { SITE_VISIT_STATUSES } from '../../shared/constants';
 import { Attachments } from '../components/Attachments';
 import { VisitActions } from '../components/VisitActions';
 import { Badge, Button, Card, EmptyState, LinkButton, Modal, Notice, PageHeader, RecordForm, Spinner, StatusBadge, useUi, type FieldSpec } from '../components/ui';
+import { DirectoryLinkBadge, useDirectoryLink } from '../components/directory/DirectoryLink';
 import { RestoreArchived, useLinkOptions } from './ConsultantVisits';
 
 export function SiteVisits({ project, focusId, onFocusHandled }: { project: Project } & FocusProps) {
@@ -21,6 +22,7 @@ export function SiteVisits({ project, focusId, onFocusHandled }: { project: Proj
   const { data: cvs } = useApi<ConsultantVisit[]>(`${base}/consultant`);
   const { taskOptions, materialOptions, label } = useLinkOptions(project.id);
   const { toast, confirm } = useUi();
+  const dir = useDirectoryLink(project);
   const [edit, setEdit] = useState<{ row: SiteVisit | null } | null>(null);
   useFocusRecord(focusId, data, (v) => v.id, (v) => setEdit({ row: v }), onFocusHandled);
 
@@ -37,6 +39,7 @@ export function SiteVisits({ project, focusId, onFocusHandled }: { project: Proj
       { name: 'status', label: 'Status', type: 'select', options: SITE_VISIT_STATUSES.map((s) => ({ value: s, label: s })) },
       { name: 'assigned_user_id', label: 'Assigned team member (user)', type: 'select', nullable: true, options: (members ?? []).map((m) => ({ value: m.id, label: m.name })), hidden: !manager },
       { name: 'assigned_name', label: 'Assigned person (if not a user)' },
+      ...(manager ? dir.fields(v, { label: 'Directory company / individual', help: 'Optional. Entries assigned to this project in Contacts — kept separate from the assigned team member.' }) : []),
       { name: 'purpose', label: 'Purpose', required: true, wide: true },
       { name: 'areas', label: 'Areas / items to inspect', type: 'textarea' },
       { name: 'findings', label: 'Findings', type: 'textarea' },
@@ -69,6 +72,7 @@ export function SiteVisits({ project, focusId, onFocusHandled }: { project: Proj
                     {v.attachment_count > 0 && <Badge tone="sky">{v.attachment_count} file(s)</Badge>}
                   </div>
                   <div className="text-xs text-slate-500 mt-0.5">{formatDateTime(v.visit_at, 'Date not set')} · {v.assigned_user_name || v.assigned_name || 'Unassigned'}{v.areas && ` · ${v.areas}`}</div>
+                  <DirectoryLinkBadge row={v} className="mt-0.5" />
                   {v.findings && <p className="text-xs text-slate-700 mt-1 line-clamp-2">{v.findings}</p>}
                   <div className="text-[11px] text-slate-400 mt-1">
                     {v.related_task_id && `Task: ${label(taskOptions, v.related_task_id)} · `}
@@ -99,7 +103,7 @@ export function SiteVisits({ project, focusId, onFocusHandled }: { project: Proj
             ) : (
               <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                 <div><dt className="text-slate-500">Date</dt><dd>{formatDateTime(current.visit_at)}</dd></div>
-                <div><dt className="text-slate-500">Assigned</dt><dd>{current.assigned_user_name || current.assigned_name || '—'}</dd></div>
+                <div><dt className="text-slate-500">Assigned</dt><dd>{current.assigned_user_name || current.assigned_name || '—'}<DirectoryLinkBadge row={current} className="block" /></dd></div>
                 <div className="sm:col-span-2"><dt className="text-slate-500">Areas</dt><dd className="whitespace-pre-wrap">{current.areas || '—'}</dd></div>
                 <div className="sm:col-span-2"><dt className="text-slate-500">Findings</dt><dd className="whitespace-pre-wrap">{current.findings || '—'}</dd></div>
               </dl>
@@ -109,6 +113,7 @@ export function SiteVisits({ project, focusId, onFocusHandled }: { project: Proj
           </div>
         )}
       </Modal>
+      {dir.dialog}
       <RestoreArchived base={`${base}/site`} onDone={reload} canRestore={manager} />
     </div>
   );

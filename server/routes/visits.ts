@@ -10,6 +10,7 @@ import { can } from '../permissions';
 import { CONSULTANT_VISIT_STATUSES, SITE_VISIT_STATUSES } from '../../shared/constants';
 import type { Notifier } from '../notify/notifier';
 import { consultantVisitEvents, siteVisitEvents } from '../notify/events';
+import { checkDirectoryLinks, directoryJoin, directoryLinkFields, directorySelect } from '../lib/directoryLinks';
 
 const uuidOrNull = z.preprocess((v) => (v === '' ? null : v), z.string().uuid().nullable()).optional();
 
@@ -26,6 +27,7 @@ const consultantSchema = z.object({
   related_task_id: uuidOrNull,
   related_material_id: uuidOrNull,
   notes: zText(4000).default(''),
+  ...directoryLinkFields,
 });
 
 const siteSchema = z.object({
@@ -40,6 +42,7 @@ const siteSchema = z.object({
   related_material_id: uuidOrNull,
   related_consultant_visit_id: uuidOrNull,
   notes: zText(4000).default(''),
+  ...directoryLinkFields,
 });
 
 const actionSchema = z.object({
@@ -82,9 +85,9 @@ export function visitRoutes(pool: pg.Pool, notifier: Notifier) {
     const inc = req.query.includeArchived === '1';
     const [v, a] = await Promise.all([
       pool.query(
-        `SELECT v.*, u.name AS consultant_user_name,
+        `SELECT v.*, u.name AS consultant_user_name, ${directorySelect('v')},
                 (SELECT count(*)::int FROM attachments x WHERE x.entity_type='consultant_visit' AND x.entity_id=v.id AND x.archived_at IS NULL) AS attachment_count
-           FROM consultant_visits v LEFT JOIN users u ON u.id = v.consultant_user_id
+           FROM consultant_visits v LEFT JOIN users u ON u.id = v.consultant_user_id ${directoryJoin('v')}
           WHERE v.project_id = $1 AND ($2 OR v.archived_at IS NULL) ORDER BY v.planned_at NULLS LAST, v.created_at`,
         [pid, inc],
       ),
@@ -101,10 +104,12 @@ export function visitRoutes(pool: pg.Pool, notifier: Notifier) {
     const row = await withTx(pool, async (c) => {
       await checkLinks(c, pid, body);
       if (!can(u.role, 'consultant.write')) {
+        if (body.directory_entry_id || body.directory_contact_id) throw forbidden('Only a project manager can link directory contacts');
         body.consultant_user_id = u.id; // consultants can only create their own visits
         if (!body.consultant_name) body.consultant_name = u.name;
       } else {
         await assertProjectMember(c, pid, body.consultant_user_id, ['consultant']);
+        await checkDirectoryLinks(c, pid, body);
       }
       const v = await insertRow(c, 'consultant_visits', { ...body, project_id: pid, created_by: u.id });
       await audit(c, req, { projectId: pid, action: 'create', entityType: 'consultant_visit', entityId: v.id as string, summary: `Added consultant visit: ${body.purpose}`, after: v });
@@ -119,10 +124,15 @@ export function visitRoutes(pool: pg.Pool, notifier: Notifier) {
     const pid = req.project!.id;
     const body = parsePatch(consultantSchema.partial(), req);
     const out = await withTx(pool, async (c) => {
-      const cur = await getOwned<{ consultant_user_id: string | null }>(c, 'consultant_visits', pid, id);
+      const cur = await getOwned<{ consultant_user_id: string | null; directory_entry_id: string | null; directory_contact_id: string | null }>(c, 'consultant_visits', pid, id);
       if (!canWriteConsultantVisit(req, cur)) throw forbidden();
-      if (!can(req.user!.role, 'consultant.write')) delete body.consultant_user_id; // cannot reassign
-      else if (body.consultant_user_id !== undefined) await assertProjectMember(c, pid, body.consultant_user_id, ['consultant']);
+      if (!can(req.user!.role, 'consultant.write')) {
+        delete body.consultant_user_id; // cannot reassign
+        if (body.directory_entry_id !== undefined || body.directory_contact_id !== undefined) throw forbidden('Only a project manager can change directory links');
+      } else {
+        if (body.consultant_user_id !== undefined) await assertProjectMember(c, pid, body.consultant_user_id, ['consultant']);
+        await checkDirectoryLinks(c, pid, body as Record<string, unknown>, cur as never);
+      }
       await checkLinks(c, pid, body);
       const { before, after } = await patchOwned(c, 'consultant_visits', pid, id, body);
       const d = diff(before, after);
@@ -140,9 +150,9 @@ export function visitRoutes(pool: pg.Pool, notifier: Notifier) {
     const inc = req.query.includeArchived === '1';
     const [v, a] = await Promise.all([
       pool.query(
-        `SELECT v.*, u.name AS assigned_user_name,
+        `SELECT v.*, u.name AS assigned_user_name, ${directorySelect('v')},
                 (SELECT count(*)::int FROM attachments x WHERE x.entity_type='site_visit' AND x.entity_id=v.id AND x.archived_at IS NULL) AS attachment_count
-           FROM site_visits v LEFT JOIN users u ON u.id = v.assigned_user_id
+           FROM site_visits v LEFT JOIN users u ON u.id = v.assigned_user_id ${directoryJoin('v')}
           WHERE v.project_id = $1 AND ($2 OR v.archived_at IS NULL) ORDER BY v.visit_at NULLS LAST, v.created_at`,
         [pid, inc],
       ),
@@ -158,6 +168,7 @@ export function visitRoutes(pool: pg.Pool, notifier: Notifier) {
     const row = await withTx(pool, async (c) => {
       await checkLinks(c, pid, body);
       await assertProjectMember(c, pid, body.assigned_user_id);
+      await checkDirectoryLinks(c, pid, body);
       const v = await insertRow(c, 'site_visits', { ...body, project_id: pid, created_by: req.user!.id });
       await audit(c, req, { projectId: pid, action: 'create', entityType: 'site_visit', entityId: v.id as string, summary: `Added site visit: ${body.purpose}`, after: v });
       return v;
@@ -171,7 +182,7 @@ export function visitRoutes(pool: pg.Pool, notifier: Notifier) {
     const pid = req.project!.id;
     const body = parsePatch(siteSchema.partial(), req) as Record<string, unknown>;
     const out = await withTx(pool, async (c) => {
-      const cur = await getOwned<{ assigned_user_id: string | null }>(c, 'site_visits', pid, id);
+      const cur = await getOwned<{ assigned_user_id: string | null; directory_entry_id: string | null; directory_contact_id: string | null }>(c, 'site_visits', pid, id);
       if (!canWriteSiteVisit(req, cur)) throw forbidden();
       const patch = body;
       if (!can(req.user!.role, 'site.write')) {
@@ -180,6 +191,7 @@ export function visitRoutes(pool: pg.Pool, notifier: Notifier) {
       } else {
         await checkLinks(c, pid, body);
         if (body.assigned_user_id !== undefined) await assertProjectMember(c, pid, body.assigned_user_id as string | null);
+        await checkDirectoryLinks(c, pid, body, cur as never);
       }
       const { before, after } = await patchOwned(c, 'site_visits', pid, id, patch);
       const d = diff(before, after);

@@ -10,12 +10,13 @@ import { can } from '../permissions';
 import { TASK_STATUSES } from '../../shared/constants';
 import type { Notifier } from '../notify/notifier';
 import { taskAssignedEvents } from '../notify/events';
+import { checkDirectoryLinks, directoryJoin, directoryLinkFields, directorySelect } from '../lib/directoryLinks';
 
 export async function loadTimeline(db: pg.Pool | pg.PoolClient, projectId: string, includeArchived = false) {
   const [ph, tk, dp] = await Promise.all([
     db.query('SELECT * FROM timeline_phases WHERE project_id = $1 AND ($2 OR archived_at IS NULL) ORDER BY seq, created_at', [projectId, includeArchived]),
     db.query(
-      `SELECT t.*, u.name AS assigned_user_name FROM timeline_tasks t LEFT JOIN users u ON u.id = t.assigned_user_id
+      `SELECT t.*, u.name AS assigned_user_name, ${directorySelect('t')} FROM timeline_tasks t LEFT JOIN users u ON u.id = t.assigned_user_id ${directoryJoin('t')}
         WHERE t.project_id = $1 AND ($2 OR t.archived_at IS NULL) ORDER BY t.sort_order, t.created_at`,
       [projectId, includeArchived],
     ),
@@ -54,6 +55,7 @@ const taskSchema = z.object({
   sort_order: z.number().int().min(0).max(10000).optional(),
   depends_on: z.array(z.string().uuid()).max(50).optional(),
   override_dependencies: z.boolean().optional(),
+  ...directoryLinkFields,
 });
 
 async function setDependencies(c: pg.PoolClient, pid: string, taskId: string, deps: string[]) {
@@ -131,6 +133,7 @@ export function timelineRoutes(pool: pg.Pool, notifier: Notifier) {
       await assertSameProject(c, 'timeline_phases', pid, body.phase_id, 'Phase');
       if (body.status === 'Completed') throw badRequest('Create the task first, then mark it completed with an actual completion date');
       await assertProjectMember(c, pid, body.assigned_user_id);
+      await checkDirectoryLinks(c, pid, body);
       const { depends_on, override_dependencies: _o, ...data } = body;
       const t = await insertRow(c, 'timeline_tasks', { ...data, project_id: pid });
       if (depends_on?.length) await setDependencies(c, pid, t.id as string, depends_on);
@@ -150,6 +153,7 @@ export function timelineRoutes(pool: pg.Pool, notifier: Notifier) {
       const cur = await getOwned<Record<string, unknown>>(c, 'timeline_tasks', pid, id);
       if (body.phase_id) await assertSameProject(c, 'timeline_phases', pid, body.phase_id, 'Phase');
       if (body.assigned_user_id !== undefined) await assertProjectMember(c, pid, body.assigned_user_id);
+      await checkDirectoryLinks(c, pid, body as Record<string, unknown>, cur as never);
       const { depends_on, override_dependencies, ...data } = body;
       if (depends_on) await setDependencies(c, pid, id, depends_on);
       const nextStatus = data.status ?? cur.status;

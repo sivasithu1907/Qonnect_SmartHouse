@@ -8,13 +8,15 @@ import { audit, diff } from '../audit';
 import { assertSameProject, getOwned, insertRow, patchOwned } from '../lib/crud';
 import { MILESTONE_STATUSES, PAYEE_TYPES, PAYMENT_METHODS } from '../../shared/constants';
 import { milestoneBalance, sumMoney, todayISO, toCents } from '../../shared/calc';
+import { checkDirectoryLinks, directoryJoin, directoryLinkFields, directorySelect } from '../lib/directoryLinks';
 
 export async function loadPayments(db: pg.Pool | pg.PoolClient, projectId: string, timeZone: string, includeArchived = false) {
   const [ms, txs, att] = await Promise.all([
     db.query(
-      `SELECT m.*, bi.name AS budget_item_name, ct.title AS contract_title FROM payment_milestones m
+      `SELECT m.*, bi.name AS budget_item_name, ct.title AS contract_title, ${directorySelect('m')} FROM payment_milestones m
          LEFT JOIN budget_items bi ON bi.id = m.budget_item_id AND bi.project_id = m.project_id
          LEFT JOIN contracts ct ON ct.id = m.contract_id AND ct.project_id = m.project_id
+         ${directoryJoin('m')}
         WHERE m.project_id = $1 AND ($2 OR m.archived_at IS NULL)
         ORDER BY m.due_date NULLS LAST, m.created_at`,
       [projectId, includeArchived],
@@ -72,6 +74,7 @@ const milestoneSchema = z.object({
   scheduled_amount: z.preprocess((v) => (typeof v === 'string' && v !== '' ? Number(v) : v), z.number().finite().positive().max(1_000_000_000)),
   status: z.enum(MILESTONE_STATUSES).default('active'),
   notes: zText(4000).default(''),
+  ...directoryLinkFields,
 });
 
 const txSchema = z.object({
@@ -132,6 +135,7 @@ export function paymentRoutes(pool: pg.Pool, timeZone: string) {
     const row = await withTx(pool, async (c) => {
       await assertSameProject(c, 'budget_items', pid, body.budget_item_id, 'Budget item');
       await assertLinkableContract(c, pid, body.contract_id);
+      await checkDirectoryLinks(c, pid, body);
       const m = await insertRow(c, 'payment_milestones', { ...body, budget_item_id: body.budget_item_id ?? null, contract_id: body.contract_id ?? null, project_id: pid, created_by: req.user!.id });
       await audit(c, req, { projectId: pid, action: 'create', entityType: 'payment_milestone', entityId: m.id as string, summary: `Scheduled payment "${body.description}" to ${body.payee_name}: QAR ${body.scheduled_amount}`, after: m });
       return m;
@@ -146,10 +150,9 @@ export function paymentRoutes(pool: pg.Pool, timeZone: string) {
     const pid = req.project!.id;
     const out = await withTx(pool, async (c) => {
       if (body.budget_item_id) await assertSameProject(c, 'budget_items', pid, body.budget_item_id, 'Budget item');
-      if (body.contract_id) {
-        const cur = await getOwned<Record<string, unknown>>(c, 'payment_milestones', pid, id);
-        if (cur.contract_id !== body.contract_id) await assertLinkableContract(c, pid, body.contract_id);
-      }
+      const cur = await getOwned<Record<string, unknown>>(c, 'payment_milestones', pid, id);
+      if (body.contract_id && cur.contract_id !== body.contract_id) await assertLinkableContract(c, pid, body.contract_id);
+      await checkDirectoryLinks(c, pid, body as Record<string, unknown>, cur as never);
       const { before, after } = await patchOwned(c, 'payment_milestones', pid, id, body);
       const d = diff(before, after);
       await audit(c, req, { projectId: pid, action: 'update', entityType: 'payment_milestone', entityId: id, summary: `Edited payment milestone "${after.description}" (${d.changed.join(', ')})`, before: d.before, after: d.after });

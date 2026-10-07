@@ -32,7 +32,12 @@ export interface BudgetResponse {
 
 export interface PaymentTransaction { id: string; milestone_id: string; amount: number; paid_date: string; method: string; reference: string; notes: string; archived_at: string | null; attachment_count: number }
 export interface MilestoneBalance { scheduled: number; paid: number; pending: number; overpaid: number; isOverdue: boolean; derivedStatus: string }
-export interface PaymentMilestone {
+/** Optional link from a project record to a Contacts directory entry (the record's own name text is kept). */
+export interface DirectoryLinked {
+  directory_entry_id?: string | null; directory_contact_id?: string | null;
+  directory_entry_name?: string | null; directory_entry_ref?: string | null; directory_entry_archived_at?: string | null; directory_contact_name?: string | null;
+}
+export interface PaymentMilestone extends DirectoryLinked {
   id: string; payee_type: string; payee_name: string; cost_category: string; budget_item_id: string | null; budget_item_name: string | null;
   contract_id: string | null; contract_title: string | null;
   po_contract_ref: string; invoice_ref: string; description: string; due_date: string | null; scheduled_amount: number;
@@ -44,7 +49,7 @@ export interface PaymentsResponse {
   totals: { scheduled: number; paid: number; pending: number; overdue: number; overdueCount: number; overpaid: number; overpaidCount: number; milestoneCount: number; transactionCount: number };
 }
 
-export interface MaterialItem {
+export interface MaterialItem extends DirectoryLinked {
   id: string; category: string; category_id: string; category_sort: number | null; category_archived_at: string | null; description: string; quantity: number | null; unit: string; amount: number | null;
   supply_responsibility: 'owner' | 'contractor' | 'needs_confirmation'; responsibility_note: string; vendor: string;
   assigned_contractor_id: string | null; assigned_contractor_name: string | null; status: string;
@@ -58,19 +63,19 @@ export interface MaterialItem {
 export interface ScopeNote { id: string; category: string; category_id: string; owner_supply: string; contractor_scope: string; source_label: string }
 
 export interface VisitAction { id: string; visit_id: string; description: string; responsible: string; due_date: string | null; status: 'Open' | 'Closed' }
-export interface ConsultantVisit {
+export interface ConsultantVisit extends DirectoryLinked {
   id: string; planned_at: string | null; consultant_name: string; consultant_user_id: string | null; consultant_user_name: string | null;
   purpose: string; areas_inspected: string; status: string; observations: string; instructions: string; next_visit_date: string | null;
   related_task_id: string | null; related_material_id: string | null; notes: string; archived_at: string | null; attachment_count: number; actions: VisitAction[];
 }
-export interface SiteVisit {
+export interface SiteVisit extends DirectoryLinked {
   id: string; visit_at: string | null; assigned_user_id: string | null; assigned_user_name: string | null; assigned_name: string;
   purpose: string; areas: string; status: string; findings: string; related_task_id: string | null; related_material_id: string | null;
   related_consultant_visit_id: string | null; notes: string; archived_at: string | null; attachment_count: number; actions: VisitAction[];
 }
 
 export interface Phase { id: string; seq: number; name: string; description: string; planned_start: string | null; planned_end: string | null; actual_start: string | null; actual_end: string | null; schedule_approved: boolean; notes: string; archived_at: string | null }
-export interface Task {
+export interface Task extends DirectoryLinked {
   id: string; phase_id: string; template_key: string | null; name: string; description: string; is_hold_point: boolean;
   planned_start: string | null; planned_end: string | null; actual_start: string | null; actual_end: string | null;
   status: string; responsible: string; notes: string; sort_order: number; archived_at: string | null; depends_on: string[];
@@ -82,7 +87,7 @@ export interface AuditEntry { id: number; action: string; entity_type: string; e
 
 /** Contract finance (shared/contractFinance.ts): paid, remaining contract balance, scheduled unpaid … */
 export type ContractPaymentSummary = import('../../shared/contractFinance').ContractFinance;
-export interface Contract {
+export interface Contract extends DirectoryLinked {
   id: string; title: string; category_id: string; category_name: string; category_sort: number; company_name: string; reference: string;
   signed_date: string | null; status: string; notes: string; drive_url: string; archived_at: string | null;
   created_at: string; updated_at: string; created_by_name: string | null; attachment_count: number; amendment_count: number;
@@ -100,6 +105,6 @@ export interface ContractDetail extends Omit<Contract, 'payments'> {
 }
 export interface ContractsResponse { contracts: Contract[]; access: { finance: boolean; budget: boolean } }
 
-export type Section = 'portfolio' | 'dashboard' | 'budget' | 'payments' | 'contracts' | 'materials' | 'consultant' | 'site' | 'timeline' | 'audit' | 'users' | 'notifications';
+export type Section = 'portfolio' | 'dashboard' | 'budget' | 'payments' | 'contracts' | 'materials' | 'consultant' | 'site' | 'timeline' | 'contacts' | 'audit' | 'users' | 'notifications';
 export interface FocusProps { focusId?: string | null; onFocusHandled?: () => void }
 export interface AppNotification { id: string; project_id: string; project_code: string; kind: string; event_type: string; title: string; body: string; url: string; read_at: string | null; created_at: string }

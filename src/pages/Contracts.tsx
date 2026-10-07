@@ -12,6 +12,7 @@ import { ManageCategories } from '../components/ManageCategories';
 import { useWideLayout } from '../components/materials/MaterialCategorySection';
 import { Badge, Button, Card, EmptyState, inputCls, LinkButton, Modal, Notice, PageHeader, RecordForm, Spinner, StatusBadge, Table, Td, Th, useUi, type FieldSpec } from '../components/ui';
 import { budgetItemOptions } from '../lib/budgetOrder';
+import { DirectoryLinkBadge, useDirectoryLink } from '../components/directory/DirectoryLink';
 import { ContractFinanceCell, ContractFinanceInline, ContractFinancePanel } from '../components/contracts/ContractFinance';
 
 export const NO_AUTO_CHANGES_NOTE = 'Saving a contract or entering its value never changes approved budget amounts, creates payment milestones or marks anything paid.';
@@ -35,6 +36,7 @@ export function Contracts({ project, focusId, onFocusHandled }: { project: Proje
   const [catsOpen, setCatsOpen] = useState(false);
   const [detailKey, setDetailKey] = useState(0);
   const { toast } = useUi();
+  const dir = useDirectoryLink(project);
   useFocusRecord(focusId, data?.contracts, (k) => k.id, (k) => setOpenId(k.id), onFocusHandled);
 
   const rows = useMemo(() => filterContracts(data?.contracts ?? [], { q, categoryId, status }), [data, q, categoryId, status]);
@@ -53,6 +55,7 @@ export function Contracts({ project, focusId, onFocusHandled }: { project: Proje
     { name: 'title', label: 'Contract title', required: true, wide: true },
     { name: 'category_id', label: 'Category', type: 'select', required: true, options: categoryOptions(row?.category_id) },
     { name: 'company_name', label: 'Contractor / company name', required: true },
+    ...dir.fields(row, { label: 'Directory company / individual' }),
     { name: 'reference', label: 'Contract reference', placeholder: 'Optional' },
     { name: 'signed_date', label: 'Signed date', type: 'date' },
     { name: 'contract_value', label: 'Contract value (QAR)', type: 'money', hidden: !finance, help: 'Optional. For reference only — it does not change the budget or payments.' },
@@ -135,7 +138,7 @@ export function Contracts({ project, focusId, onFocusHandled }: { project: Proje
                 <tr key={k.id} id={`rec-${k.id}`} className={`hover:bg-slate-50/60 cursor-pointer ${k.archived_at ? 'opacity-60' : ''}`} onClick={() => setOpenId(k.id)}>
                   <Td><button type="button" className="text-left font-semibold text-slate-900 hover:text-sky-700" onClick={(e) => { e.stopPropagation(); setOpenId(k.id); }}>{k.title}</button><div className="text-[11px] text-slate-500 lg:hidden">{k.category_name}</div>{k.reference && <div className="text-[11px] text-slate-500">Ref: {k.reference}</div>}</Td>
                   <Td className="hidden lg:table-cell">{k.category_name}</Td>
-                  <Td>{k.company_name}</Td>
+                  <Td>{k.company_name}<DirectoryLinkBadge row={k} className="block" /></Td>
                   <Td className="whitespace-nowrap">{formatDate(k.signed_date)}</Td>
                   {finance && <Td className="text-right font-mono whitespace-nowrap">{formatQAR(k.contract_value)}</Td>}
                   <Td><StatusBadge status={k.status} />{k.archived_at && <Badge tone="rose">Archived</Badge>}</Td>
@@ -155,7 +158,7 @@ export function Contracts({ project, focusId, onFocusHandled }: { project: Proje
                     <span className="font-semibold text-slate-900 break-words min-w-0">{k.title}</span>
                     <span className="shrink-0"><StatusBadge status={k.status} /></span>
                   </div>
-                  <div className="text-xs text-slate-600 mt-1 break-words">{k.company_name} · {k.category_name}</div>
+                  <div className="text-xs text-slate-600 mt-1 break-words">{k.company_name} · {k.category_name}</div><DirectoryLinkBadge row={k} />
                   <div className="text-[11px] text-slate-500 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
                     <span>Signed {formatDate(k.signed_date)}</span>
                     {finance && <span>Value {formatQAR(k.contract_value)}</span>}
@@ -187,6 +190,7 @@ export function Contracts({ project, focusId, onFocusHandled }: { project: Proje
           </>
         )}
       </Modal>
+      {dir.dialog}
       <Modal open={edit?.kind === 'amendment'} title={edit?.kind === 'amendment' && edit.row ? 'Edit amendment' : 'Record amendment'} subtitle={edit?.kind === 'amendment' ? edit.contract.title : undefined} onClose={() => setEdit(null)}>
         {edit?.kind === 'amendment' && <RecordForm fields={amendmentFields} initial={edit.row} onCancel={() => setEdit(null)} onSubmit={(v) => saveAmendment(edit, v)} />}
       </Modal>
@@ -232,7 +236,7 @@ function ContractDetails({ project, id, writable, onClose, onEdit, onAmend, onCh
             <h3 id="contract-summary" className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-2">Summary</h3>
             <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
               <Field label="Category">{k.category_name}</Field>
-              <Field label="Contractor / company">{k.company_name}</Field>
+              <Field label="Contractor / company">{k.company_name}<DirectoryLinkBadge row={k} className="block" /></Field>
               <Field label="Contract reference">{k.reference || '—'}</Field>
               <Field label="Signed date">{formatDate(k.signed_date)}</Field>
               {'contract_value' in k && <Field label="Contract value">{formatQAR(k.contract_value, { blank: 'Not entered' })}</Field>}

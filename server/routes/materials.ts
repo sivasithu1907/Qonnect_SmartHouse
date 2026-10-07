@@ -11,6 +11,7 @@ import { can, CONTRACTOR_MATERIAL_FIELDS } from '../permissions';
 import { INSPECTION_STATUSES, MATERIAL_STATUSES, SUPPLY_RESPONSIBILITIES } from '../../shared/constants';
 import type { Notifier } from '../notify/notifier';
 import { materialDateEvents } from '../notify/events';
+import { checkDirectoryLinks, directoryJoin, directoryLinkFields, directorySelect } from '../lib/directoryLinks';
 import { todayISO } from '../../shared/calc';
 import { DATE_FIELD_LABELS, materialSchedule, type DateField } from '../../shared/materialSchedule';
 
@@ -18,11 +19,12 @@ export async function loadMaterials(db: pg.Pool | pg.PoolClient, projectId: stri
   const [items, notes] = await Promise.all([
     db.query(
       `SELECT mi.*, mc.name AS category, mc.sort_order AS category_sort, mc.archived_at AS category_archived_at,
-              u.name AS assigned_contractor_name,
+              u.name AS assigned_contractor_name, ${directorySelect('mi')},
               (SELECT count(*)::int FROM attachments a WHERE a.entity_type = 'material' AND a.entity_id = mi.id AND a.archived_at IS NULL) AS attachment_count
          FROM material_items mi
          LEFT JOIN material_categories mc ON mc.id = mi.category_id
          LEFT JOIN users u ON u.id = mi.assigned_contractor_id
+         ${directoryJoin('mi')}
         WHERE mi.project_id = $1 AND ($2 OR mi.archived_at IS NULL)
         ORDER BY mc.sort_order NULLS LAST, mi.sort_order, mi.created_at`,
       [projectId, includeArchived],
@@ -84,6 +86,7 @@ const materialSchema = z.object({
   notes: zText(4000).default(''),
   is_package: z.boolean().optional(),
   sort_order: z.number().int().min(0).max(100000).optional(),
+  ...directoryLinkFields,
 });
 
 export function materialRoutes(pool: pg.Pool, notifier: Notifier, timeZone = 'Asia/Qatar') {
@@ -102,6 +105,7 @@ export function materialRoutes(pool: pg.Pool, notifier: Notifier, timeZone = 'As
     const row = await withTx(pool, async (c) => {
       await assertMaterialCategory(c, pid, body.category_id);
       await assertProjectMember(c, pid, body.assigned_contractor_id, ['contractor']);
+      await checkDirectoryLinks(c, pid, body);
       if (body.sort_order === undefined) {
         const { rows } = await c.query('SELECT COALESCE(MAX(sort_order),0)+1 AS n FROM material_items WHERE project_id = $1', [pid]);
         body.sort_order = rows[0].n;
@@ -137,6 +141,7 @@ export function materialRoutes(pool: pg.Pool, notifier: Notifier, timeZone = 'As
         if (body.category_id !== undefined && body.category_id !== current.category_id) {
           await assertMaterialCategory(c, pid, body.category_id as string);
         }
+        await checkDirectoryLinks(c, pid, patch, current as never);
       }
       const { before, after } = await patchOwned(c, 'material_items', pid, id, patch);
       const d = diff(before, after);

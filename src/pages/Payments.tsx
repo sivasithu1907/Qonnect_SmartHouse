@@ -9,6 +9,7 @@ import { PAYEE_TYPE_LABELS, PAYEE_TYPES, PAYMENT_METHOD_LABELS, PAYMENT_METHODS 
 import { Attachments } from '../components/Attachments';
 import { budgetItemOptions } from '../lib/budgetOrder';
 import { Badge, Button, Card, EmptyState, inputCls, Kpi, LinkButton, Modal, Notice, PageHeader, RecordForm, Spinner, StatusBadge, Table, Td, Th, useUi, type FieldSpec } from '../components/ui';
+import { DirectoryLinkBadge, useDirectoryLink } from '../components/directory/DirectoryLink';
 
 type Edit = { kind: 'milestone'; row: PaymentMilestone | null } | { kind: 'tx'; milestone: PaymentMilestone; row: PaymentTransaction | null };
 
@@ -19,6 +20,7 @@ export function Payments({ project, focusId, onFocusHandled }: { project: Projec
   const { can } = useSession();
   const { data: budget } = useApi<BudgetResponse>(can('budget.read') ? `/api/projects/${project.id}/budget` : null);
   const { toast, confirm } = useUi();
+  const dir = useDirectoryLink(project);
   const [edit, setEdit] = useState<Edit | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   useFocusRecord(focusId, data?.milestones, (m) => m.id, (m) => setOpen((o) => ({ ...o, [m.id]: true })), onFocusHandled);
@@ -46,6 +48,7 @@ export function Payments({ project, focusId, onFocusHandled }: { project: Projec
   const milestoneFields: FieldSpec[] = [
     { name: 'payee_type', label: 'Payee type', type: 'select', options: PAYEE_TYPES.map((p) => ({ value: p, label: PAYEE_TYPE_LABELS[p] })), required: true },
     { name: 'payee_name', label: 'Payee name', required: true },
+    ...dir.fields(editingMilestone, { label: 'Directory payee', help: 'Optional. Entries assigned to this project in Contacts. Linking keeps the payee name as typed and does not change any amount or payment.' }),
     { name: 'cost_category', label: 'Cost category' },
     { name: 'budget_item_id', label: 'Related master budget item', type: 'searchselect', nullable: true, options: budgetOptions, wide: true,
       noneLabel: 'No linked budget item', noMatchLabel: 'No matching items', searchPlaceholder: 'Search items or categories…',
@@ -130,7 +133,7 @@ export function Payments({ project, focusId, onFocusHandled }: { project: Projec
                 <React.Fragment key={m.id}>
                   <tr id={`rec-${m.id}`} className={`${m.archived_at ? 'opacity-60' : ''} hover:bg-slate-50/60`}>
                     <Td><button onClick={() => setOpen((o) => ({ ...o, [m.id]: !o[m.id] }))} className="p-0.5 text-slate-500" aria-label="Toggle transfers">{open[m.id] ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}</button></Td>
-                    <Td><div className="font-semibold text-slate-900">{m.payee_name}</div><div className="text-[11px] text-slate-500">{PAYEE_TYPE_LABELS[m.payee_type as keyof typeof PAYEE_TYPE_LABELS]}{m.cost_category ? ` · ${m.cost_category}` : ''}</div></Td>
+                    <Td><div className="font-semibold text-slate-900">{m.payee_name}</div><DirectoryLinkBadge row={m} className="block" /><div className="text-[11px] text-slate-500">{PAYEE_TYPE_LABELS[m.payee_type as keyof typeof PAYEE_TYPE_LABELS]}{m.cost_category ? ` · ${m.cost_category}` : ''}</div></Td>
                     <Td><div>{m.description}</div>{m.budget_item_name && <div className="text-[11px] text-slate-500">Budget: {m.budget_item_name}</div>}{m.contract_title && <div className="text-[11px] text-slate-500">Contract: {can('contracts.read') ? <a href={`#/contracts/${project.id}/${m.contract_id}`} className="text-sky-700">{m.contract_title}</a> : m.contract_title}</div>}</Td>
                     <Td className="text-[11px]">{m.po_contract_ref && <div>PO/Contract: {m.po_contract_ref}</div>}{m.invoice_ref && <div>Invoice: {m.invoice_ref}</div>}</Td>
                     <Td className="whitespace-nowrap">{formatDate(m.due_date)}</Td>
@@ -200,6 +203,7 @@ export function Payments({ project, focusId, onFocusHandled }: { project: Projec
             onCancel={() => setEdit(null)} onSubmit={(v) => saveTx(edit, v)} />
         )}
       </Modal>
+      {dir.dialog}
     </div>
   );
 }

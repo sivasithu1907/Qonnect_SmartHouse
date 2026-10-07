@@ -6,6 +6,7 @@ import { SUPPLY_RESPONSIBILITY_LABELS } from '../../../shared/constants';
 import { qtyRemaining } from '../../../shared/calc';
 import { categorySummary } from '../../lib/materialFilters';
 import { ScheduleCell } from './MaterialScheduleParts';
+import { DirectoryLinkBadge } from '../directory/DirectoryLink';
 import { Badge, Button, NeedsConfirmation, StatusBadge, Table, Td, Th } from '../ui';
 
 /** true from 768 px (tablet portrait and up): table layout; below it: one card per line. */
@@ -125,7 +126,7 @@ export function MaterialCategorySection({ category: c, items, note, today, open,
                     <Td className="font-semibold text-slate-900 min-w-[170px]">{m.description}{m.is_package && <> <Badge tone="violet">Package</Badge></>}{m.amount !== null && <div className="text-[11px] font-normal text-slate-500">{formatQAR(m.amount)}</div>}{m.archived_at && <> <Badge tone="rose">Archived</Badge></>}</Td>
                     <Td>{m.quantity !== null ? `${m.quantity} ${m.unit}` : dash}</Td>
                     <Td><Responsibility m={m} /></Td>
-                    <Td>{m.vendor || dash}{m.assigned_contractor_name && <div className="text-[11px] text-slate-500">Assigned: {m.assigned_contractor_name}</div>}</Td>
+                    <Td>{m.vendor || dash}<DirectoryLinkBadge row={m} className="block" />{m.assigned_contractor_name && <div className="text-[11px] text-slate-500">Assigned: {m.assigned_contractor_name}</div>}</Td>
                     <Td><StatusBadge status={m.status} /></Td>
                     <Td className="whitespace-nowrap"><ScheduleCell m={m} today={today} /></Td>
                     <Td><QtyTracking m={m} /></Td>
@@ -156,7 +157,7 @@ export function MaterialCategorySection({ category: c, items, note, today, open,
                     <div className="col-span-2"><dt className="text-[11px] text-slate-500">{m.supply_responsibility === 'contractor' ? 'Work schedule' : m.supply_responsibility === 'owner' ? 'Delivery schedule' : 'Schedule'}</dt><dd className="mt-0.5 text-slate-800"><ScheduleCell m={m} today={today} /></dd></div>
                     <div><dt className="text-[11px] text-slate-500">Quantity</dt><dd className="mt-0.5 text-slate-800">{m.quantity !== null ? `${m.quantity} ${m.unit}` : dash}</dd></div>
                     {m.supply_responsibility !== 'contractor' && <div><dt className="text-[11px] text-slate-500">Ordered / delivered / remaining</dt><dd className="mt-0.5 font-mono text-[11px] text-slate-800">{qtys(m)}</dd></div>}
-                    <div><dt className="text-[11px] text-slate-500">Vendor / assigned</dt><dd className="mt-0.5 text-slate-800">{m.vendor || dash}{m.assigned_contractor_name && <div className="text-[11px] text-slate-500">Assigned: {m.assigned_contractor_name}</div>}</dd></div>
+                    <div><dt className="text-[11px] text-slate-500">Vendor / assigned</dt><dd className="mt-0.5 text-slate-800">{m.vendor || dash}<DirectoryLinkBadge row={m} className="block" />{m.assigned_contractor_name && <div className="text-[11px] text-slate-500">Assigned: {m.assigned_contractor_name}</div>}</dd></div>
                     <div><dt className="text-[11px] text-slate-500">Inspection</dt><dd className="mt-0.5 text-slate-800">{m.inspection_status || dash}</dd></div>
                     <div><dt className="text-[11px] text-slate-500">Follow-up</dt><dd className="mt-0.5 text-slate-800">{formatDate(m.next_follow_up_date)}</dd></div>
                     {m.amount !== null && <div><dt className="text-[11px] text-slate-500">Amount</dt><dd className="mt-0.5 text-slate-800">{formatQAR(m.amount)}</dd></div>}

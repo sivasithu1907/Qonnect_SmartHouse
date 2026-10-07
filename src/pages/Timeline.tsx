@@ -9,6 +9,7 @@ import { TASK_STATUSES } from '../../shared/constants';
 import { Attachments } from '../components/Attachments';
 import { labelOf, materialOptions, timelineTaskOptions } from '../lib/options';
 import { Badge, Button, Card, EmptyState, Modal, Notice, PageHeader, RecordForm, Spinner, StatusBadge, Tabs, useUi, type FieldSpec } from '../components/ui';
+import { DirectoryLinkBadge, useDirectoryLink } from '../components/directory/DirectoryLink';
 import { GanttChart } from '../components/schedule/GanttChart';
 import { MaterialDateSummary } from '../components/schedule/ScheduleMarks';
 import { plannedSpan } from '../lib/schedule';
@@ -23,6 +24,7 @@ export function Timeline({ project, focusId, onFocusHandled }: { project: Projec
   const { data: mats } = useApi<{ items: MaterialItem[] }>(`/api/projects/${project.id}/materials`);
   const { user, can } = useSession();
   const { toast, confirm } = useUi();
+  const dir = useDirectoryLink(project);
   const writable = can('timeline.write') && !project.archived_at;
   const { data: members } = useApi<Member[]>(writable ? `/api/projects/${project.id}/members` : null);
   const canPost = can('workupdates.write') && !project.archived_at;
@@ -52,6 +54,7 @@ export function Timeline({ project, focusId, onFocusHandled }: { project: Projec
     { name: 'is_hold_point', label: 'Inspection / hold point (must pass before follow-on work)', type: 'checkbox', wide: true },
     { name: 'status', label: 'Status', type: 'select', options: TASK_STATUSES.filter((s) => row || s !== 'Completed').map((s) => ({ value: s, label: s })) },
     { name: 'responsible', label: 'Responsible (name / company)' },
+    ...dir.fields(row, { label: 'Directory responsible company / individual', help: 'Optional. Entries assigned to this project in Contacts. Separate from the assigned user; task status and dates do not change.' }),
     { name: 'assigned_user_id', label: 'Assigned user (receives task notifications)', type: 'select', nullable: true, options: (members ?? []).map((m) => ({ value: m.id, label: m.name })) },
     { name: 'planned_start', label: 'Planned start', type: 'date' },
     { name: 'planned_end', label: 'Planned finish', type: 'date' },
@@ -145,6 +148,7 @@ export function Timeline({ project, focusId, onFocusHandled }: { project: Projec
                                   {t.responsible && ` · ${t.responsible}`}
                                   {t.assigned_user_name && ` · Assigned: ${t.assigned_user_name}`}
                                 </div>
+                                <DirectoryLinkBadge row={t} />
                                 {t.depends_on.length > 0 && (
                                   <div className="text-[11px] mt-0.5 flex items-start gap-1 text-slate-500">
                                     <Link2 className="w-3 h-3 mt-0.5 shrink-0" />
@@ -232,6 +236,7 @@ export function Timeline({ project, focusId, onFocusHandled }: { project: Projec
             }} />
         )}
       </Modal>
+      {dir.dialog}
 
       <Modal open={!!detail} onClose={() => setDetail(null)}
         title={detail?.kind === 'task' ? detail.row.name : detail?.kind === 'phase' ? `${detail.row.seq}. ${detail.row.name}` : 'Materials & contractor work'}
@@ -269,7 +274,7 @@ function TaskDetail({ t, phase, taskById }: { t: Task; phase?: Phase; taskById: 
       <Field label="Planned">{formatDate(t.planned_start)} → {formatDate(t.planned_end)}{span.kind === 'range' && ` (${span.days} day${span.days === 1 ? '' : 's'})`}</Field>
       <Field label="Actual">{formatDate(t.actual_start)} → {formatDate(t.actual_end)}</Field>
       <Field label="Assigned user">{t.assigned_user_name ?? '—'}</Field>
-      <Field label="Responsible">{t.responsible || '—'}</Field>
+      <Field label="Responsible">{t.responsible || '—'}<DirectoryLinkBadge row={t} className="block" /></Field>
       {t.depends_on.length > 0 && <Field label="After">{t.depends_on.map((id) => taskById.get(id)?.name ?? '—').join('; ')}</Field>}
       {t.description && <p className="text-xs text-slate-600 whitespace-pre-wrap">{t.description}</p>}
       {t.notes && <p className="text-xs text-slate-600 whitespace-pre-wrap">{t.notes}</p>}
