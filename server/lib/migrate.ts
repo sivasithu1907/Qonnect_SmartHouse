@@ -5,6 +5,16 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import type pg from 'pg';
 
+export interface MigrationFile { filename: string; sql: string; checksum: string }
+
+/** The migration files shipped with this version of the application, in order. */
+export function readMigrations(dir: string): MigrationFile[] {
+  return fs.readdirSync(dir).filter((f) => /^\d+_.*\.sql$/.test(f)).sort().map((filename) => {
+    const sql = fs.readFileSync(path.join(dir, filename), 'utf8');
+    return { filename, sql, checksum: crypto.createHash('sha256').update(sql).digest('hex') };
+  });
+}
+
 export async function runMigrations(pool: pg.Pool, dir: string, log: (m: string) => void = console.log): Promise<string[]> {
   const client = await pool.connect();
   const applied: string[] = [];

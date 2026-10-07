@@ -30,7 +30,8 @@ export type Capability =
   | 'categories.manage'    // add / rename / reorder / archive / delete budget, material and contract categories
   | 'directory.read'       // Contacts: read entries available through the user's projects (admin / PM: whole directory)
   | 'directory.create'     // Contacts: create entries, add contact people, assign to own projects, project documents
-  | 'directory.manage';    // Contacts: edit / archive shared identity and contacts, shared documents, any project
+  | 'directory.manage'     // Contacts: edit / archive shared identity and contacts, shared documents, any project
+  | 'backup.manage';       // Settings → Backup & Restore: create, download, upload, validate, restore (admin only)
 
 const MATRIX: Record<Role, Capability[]> = {
   admin: [
@@ -38,7 +39,7 @@ const MATRIX: Record<Role, Capability[]> = {
     'materials.read', 'materials.write', 'consultant.read', 'consultant.write', 'site.read', 'site.write',
     'timeline.read', 'timeline.write', 'workupdates.write', 'audit.read', 'categories.manage',
     'contracts.read', 'contracts.write', 'prerequisites.read', 'prerequisites.write',
-    'directory.read', 'directory.create', 'directory.manage',
+    'directory.read', 'directory.create', 'directory.manage', 'backup.manage',
   ],
   project_manager: [
     'links.edit', 'budget.read', 'payments.read', 'payments.write', 'materials.read', 'materials.write',

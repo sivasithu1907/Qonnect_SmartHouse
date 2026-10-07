@@ -51,8 +51,14 @@ services:
       VAPID_SUBJECT: ${VAPID_SUBJECT:-}
       PUSH_ALLOWED_HOSTS: ${PUSH_ALLOWED_HOSTS:-}
       NOTIFY_SCHEDULER: ${NOTIFY_SCHEDULER:-true}
+      # Backup & Restore (Settings → Backup & restore, and dist-server/backup.js)
+      BACKUP_DIR: /data/backups
+      BACKUP_RETENTION: ${BACKUP_RETENTION:-10}
+      BACKUP_MAX_UPLOAD_MB: ${BACKUP_MAX_UPLOAD_MB:-20480}
+      APP_COMMIT: ${APP_TAG:-}
     volumes:
       - uploads:/data/uploads
+      - backups:/data/backups
     networks: [internal]
     # Bound to localhost only; put your existing reverse proxy (TLS) in front of it.
     ports:
@@ -67,3 +73,5 @@ volumes:
     name: ${COMPOSE_PROJECT_NAME:-qonnect-smarthouse}_pgdata
   uploads:
     name: ${COMPOSE_PROJECT_NAME:-qonnect-smarthouse}_uploads
+  backups:
+    name: ${COMPOSE_PROJECT_NAME:-qonnect-smarthouse}_backups

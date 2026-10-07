@@ -21,12 +21,14 @@ import { AuditLog } from './pages/AuditLog';
 import { Contracts } from './pages/Contracts';
 import { Contacts } from './pages/Contacts';
 import { UsersAdmin } from './pages/UsersAdmin';
+import { BackupRestore } from './pages/BackupRestore';
+import { RecoveryBanner } from './components/RecoveryBanner';
 import { NotificationSettings } from './pages/NotificationSettings';
 import { UpdateBanner } from './components/UpdateBanner';
 import { InstallAppDialog } from './components/InstallApp';
 import { detachDeviceOnLogout, syncSubscription } from './lib/push';
 
-const SECTIONS: Section[] = ['portfolio', 'dashboard', 'budget', 'payments', 'contracts', 'materials', 'consultant', 'site', 'timeline', 'contacts', 'audit', 'users', 'notifications'];
+const SECTIONS: Section[] = ['portfolio', 'dashboard', 'budget', 'payments', 'contracts', 'materials', 'consultant', 'site', 'timeline', 'contacts', 'audit', 'users', 'notifications', 'backup'];
 const UUID = /^[0-9a-f-]{36}$/i;
 const FOCUS_FILTER = /^filter:[a-z-]{1,40}$/; // e.g. #/materials/<project>/filter:no-date
 
@@ -134,7 +136,7 @@ function Shell() {
 
   const selectProject = (id: string) => {
     setProjectId(id);
-    if (section === 'portfolio' || section === 'users' || section === 'notifications') setSection('dashboard');
+    if (section === 'portfolio' || section === 'users' || section === 'notifications' || section === 'backup') setSection('dashboard');
   };
   const onProjectSaved = async (p: Project | null) => {
     await loadProjects();
@@ -146,7 +148,7 @@ function Shell() {
 
   const selectable = projectsForSelector(projects, canManageProjects, current?.id);
   const pageKey = `${current?.id}-${refreshKey}`;
-  const needsProject = !['portfolio', 'users', 'notifications'].includes(section);
+  const needsProject = !['portfolio', 'users', 'notifications', 'backup'].includes(section);
   const focusProps = { focusId, onFocusHandled: () => setFocusId(null) };
 
   return (
@@ -163,9 +165,11 @@ function Shell() {
         onInstallApp={() => setInstallOpen(true)}
       />
       <UpdateBanner />
+      <RecoveryBanner onOpen={() => setSection('backup')} hidden={section === 'backup'} />
       <main className={`flex-1 min-w-0 py-6 sm:py-8 ${PAGE_CONTAINER}`}>
         {section === 'portfolio' && <Portfolio key={refreshKey} onOpen={(id, s) => { setProjectId(id); setSection(s ?? 'dashboard'); }} onCreate={() => setCreateOpen(true)} />}
         {section === 'users' && <UsersAdmin projects={projects} />}
+        {section === 'backup' && <BackupRestore />}
         {section === 'notifications' && <NotificationSettings projects={projects.filter((p) => !p.archived_at)} onInstallApp={() => setInstallOpen(true)} />}
         {needsProject && !current && <EmptyState title="No project selected">You are not assigned to any active project yet. Ask an administrator for access.</EmptyState>}
         {needsProject && current && (

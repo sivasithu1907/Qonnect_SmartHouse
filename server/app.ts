@@ -25,6 +25,10 @@ import { directoryRoutes, projectDirectoryRoute } from './routes/directory';
 import { contractRoutes } from './routes/contracts';
 import { prerequisiteRoutes } from './routes/prerequisites';
 import { dashboardRoutes, portfolioRoute } from './routes/dashboard';
+import { backupRoutes } from './routes/backup';
+import { OpsState } from './backup/ops';
+import { BackupService, readAppInfo } from './backup/service';
+import { readMigrations } from './lib/migrate';
 
 export interface AppOptions {
   pushSender?: PushSender; // injectable for tests
@@ -32,8 +36,15 @@ export interface AppOptions {
 
 export function createApp(pool: pg.Pool, cfg: AppConfig, opts: AppOptions = {}) {
   const app = express();
-  const notifier = new Notifier(pool, opts.pushSender ?? createWebPushSender(cfg));
+  // maintenance / write-freeze state and the persistent "jobs paused after restore" flag
+  const ops = new OpsState(path.join(cfg.backupDir, 'ops-state.json'));
+  const backup = new BackupService(pool, {
+    uploadDir: cfg.uploadDir, backupDir: cfg.backupDir, backupRetention: cfg.backupRetention, backupMaxUploadBytes: cfg.backupMaxUploadMb * 1024 * 1024,
+  }, ops, readAppInfo(cfg.migrationsDir, readMigrations), cfg.nodeEnv === 'test' ? () => undefined : console.log);
+  const notifier = new Notifier(pool, opts.pushSender ?? createWebPushSender(cfg), undefined, () => ops.jobsPaused);
   app.locals.notifier = notifier;
+  app.locals.ops = ops;
+  app.locals.backup = backup;
   app.disable('x-powered-by');
   app.set('trust proxy', cfg.trustProxy);
 
@@ -58,12 +69,19 @@ export function createApp(pool: pg.Pool, cfg: AppConfig, opts: AppOptions = {}) 
     }),
   );
   app.use(cookieParser());
+  app.use('/api', ops.middleware());
   app.use(express.json({ limit: '1mb' }));
 
   // health check (no auth) — used by Docker/orchestrator
   app.get('/api/health', async (_req, res) => {
     await pool.query('SELECT 1');
     res.json({ ok: true });
+  });
+
+  // public, minimal: lets the sign-in page and open tabs show "restore in progress"
+  app.get('/api/system/status', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ maintenance: ops.maintenance !== null, message: ops.maintenance });
   });
 
   app.use('/api', sessionLoader(pool, cfg), csrfGuard(cfg));
@@ -73,6 +91,7 @@ export function createApp(pool: pg.Pool, cfg: AppConfig, opts: AppOptions = {}) 
   app.use('/api/notifications', requireAuth, notificationRoutes(pool, cfg, notifier));
   app.use('/api/projects', requireAuth, projectCollectionRoutes(pool));
   app.use('/api/directory', requireAuth, directoryRoutes(pool, cfg));
+  app.use('/api/admin/backup', requireAuth, backupRoutes(pool, backup));
 
   const project = express.Router({ mergeParams: true });
   project.use('/budget', budgetRoutes(pool));

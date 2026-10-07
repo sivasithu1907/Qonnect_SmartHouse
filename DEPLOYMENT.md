@@ -264,6 +264,10 @@ Migrations are forward-only and transactional; a migration file changed after be
 
 ### C5. Backups
 
+**Full backup & restore (recommended for disaster recovery):** Settings → **Backup & restore** in the app (administrators), or `docker compose run --rm app node dist-server/backup.js create|validate|restore`. One verified archive holds the database and every uploaded file and can be restored on a new server — see [docs/BACKUP_RESTORE.md](docs/BACKUP_RESTORE.md) for usage and the A–Z recovery guide.
+
+The script below remains available as an additional server-level copy (database dump + uploads volume):
+
 `./scripts/backup.sh` writes `backups/db-<stamp>.dump`, `uploads-<stamp>.tar.gz` and checksums (mode 600). Optional nightly cron, 30-day retention:
 
 ```

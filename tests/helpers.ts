@@ -48,7 +48,8 @@ export async function setup(opts: { pushSender?: PushSender; cfg?: Partial<AppCo
   await runMigrations(pool, path.resolve('migrations'), () => undefined);
   await seedProjects(pool, () => undefined);
   const uploadDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sh-uploads-'));
-  const cfg = loadConfig({ databaseUrl: TEST_DB, uploadDir, cookieSecure: false, nodeEnv: 'test', staticDir: '/nonexistent', maxUploadMb: 1, notifySchedulerEnabled: false, ...opts.cfg });
+  const backupDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sh-backups-'));
+  const cfg = loadConfig({ databaseUrl: TEST_DB, uploadDir, backupDir, cookieSecure: false, nodeEnv: 'test', staticDir: '/nonexistent', maxUploadMb: 1, notifySchedulerEnabled: false, ...opts.cfg });
   const app = createApp(pool, cfg, { pushSender: opts.pushSender });
 
   const pr = await pool.query('SELECT id, code FROM projects');
@@ -102,6 +103,7 @@ export async function setup(opts: { pushSender?: PushSender; cfg?: Partial<AppCo
     close: async () => {
       await pool.end();
       fs.rmSync(uploadDir, { recursive: true, force: true });
+      fs.rmSync(backupDir, { recursive: true, force: true });
     },
   };
 }

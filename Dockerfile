@@ -12,6 +12,7 @@ ENV NODE_ENV=production \
     PORT=8080 \
     STATIC_DIR=/app/dist \
     UPLOAD_DIR=/data/uploads \
+    BACKUP_DIR=/data/backups \
     MIGRATIONS_DIR=/app/migrations
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
@@ -19,7 +20,8 @@ COPY --from=build /app/dist ./dist
 COPY --from=build /app/dist-server ./dist-server
 COPY --from=build /app/migrations ./migrations
 COPY --from=build /app/package.json ./package.json
-RUN mkdir -p /data/uploads && chown -R node:node /data
+# /data/backups: private backup archives (separate volume, never served); owned by the app user
+RUN mkdir -p /data/uploads /data/backups && chown -R node:node /data && chmod 700 /data/backups
 USER node
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

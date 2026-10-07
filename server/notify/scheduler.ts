@@ -110,8 +110,10 @@ export async function runDueChecks(pool: pg.Pool, notifier: Notifier, timeZone: 
   }
 }
 
-export function startScheduler(pool: pg.Pool, notifier: Notifier, timeZone: string, everyMs = 60 * 60_000) {
-  const run = () => runDueChecks(pool, notifier, timeZone).catch((e) => console.warn(`[notify] due-date check failed: ${(e as Error).message}`));
+export function startScheduler(pool: pg.Pool, notifier: Notifier, timeZone: string, everyMs = 60 * 60_000, isPaused: () => boolean = () => false) {
+  // paused during a restore and after one, until an administrator resumes background jobs
+  const run = () => (isPaused() ? Promise.resolve() : runDueChecks(pool, notifier, timeZone).then(() => undefined))
+    .catch((e) => console.warn(`[notify] due-date check failed: ${(e as Error).message}`));
   const first = setTimeout(run, 60_000);
   const timer = setInterval(run, everyMs);
   first.unref();

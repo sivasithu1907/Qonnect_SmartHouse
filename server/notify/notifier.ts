@@ -36,7 +36,11 @@ export const PUSH_RATE_LIMIT = { max: 10, windowMinutes: 10 };
 export class Notifier {
   private pending = new Set<Promise<unknown>>();
 
-  constructor(private pool: pg.Pool, private sender: PushSender, private log: (m: string) => void = (m) => console.warn(m)) {}
+  constructor(
+    private pool: pg.Pool, private sender: PushSender, private log: (m: string) => void = (m) => console.warn(m),
+    /** true while a restore runs and until an admin resumes jobs after recovery: no push is sent */
+    private pushPaused: () => boolean = () => false,
+  ) {}
 
   get pushConfigured() {
     return this.sender.configured;
@@ -93,6 +97,7 @@ export class Notifier {
     const title = `Qonnect · ${pr[0].code}`;
     const url = `/#/${ev.section}/${ev.projectId}/${ev.entityId}`;
     let created = 0;
+    const paused = this.pushPaused();
     for (const r of recipients) {
       const ins = await this.pool.query(
         `INSERT INTO notifications (user_id, project_id, event_type, kind, entity_type, entity_id, dedupe_key, title, body, url, push_status)
@@ -100,11 +105,11 @@ export class Notifier {
          ON CONFLICT (user_id, dedupe_key) DO NOTHING
          RETURNING id`,
         [r.id, ev.projectId, ev.eventType, ev.kind, ev.entityType, ev.entityId, ev.dedupeKey, title, ev.body, url,
-          !r.pushEnabled ? 'skipped' : this.sender.configured ? 'pending' : 'not_configured'],
+          !r.pushEnabled || paused ? 'skipped' : this.sender.configured ? 'pending' : 'not_configured'],
       );
       if (!ins.rows[0]) continue; // already notified for this exact event → no duplicate alert
       created++;
-      if (r.pushEnabled && this.sender.configured) {
+      if (r.pushEnabled && this.sender.configured && !paused) {
         await this.deliver(ins.rows[0].id, r.id, { title, body: ev.body, url, tag: topicFor(`${r.id}:${ev.dedupeKey}`) }, `${r.id}:${ev.dedupeKey}`);
       }
     }

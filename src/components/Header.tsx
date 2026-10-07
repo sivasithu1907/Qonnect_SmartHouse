@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { PAGE_CONTAINER } from '../lib/layout';
 import {
   BookUser, Building2, CalendarDays, Check, ChevronDown, Coins, CreditCard, ExternalLink, FileSignature, FolderOpen, FolderPlus, FolderX, History, Layers, LayoutDashboard, LogOut,
-  MapPin, Menu, Plus, Settings, Truck, UserCheck, Users, X, KeyRound, Bell, Download,
+  DatabaseBackup, MapPin, Menu, Plus, Settings, Truck, UserCheck, Users, X, KeyRound, Bell, Download,
 } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
 import { isStandalone } from '../lib/pwa';
@@ -209,6 +209,9 @@ export function Header({ section, onNavigate, projects, current, onSelectProject
                   <div className="px-3 py-1.5 text-[11px] text-slate-500 border-b border-slate-100 truncate">{user.email}</div>
                   {can('users.manage') && (
                     <button onClick={() => { go('users'); setUserMenu(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"><Users className="w-3.5 h-3.5" />Users & access</button>
+                  )}
+                  {can('backup.manage') && (
+                    <button onClick={() => { go('backup'); setUserMenu(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"><DatabaseBackup className="w-3.5 h-3.5" />Backup & restore</button>
                   )}
                   <button onClick={() => { go('notifications'); setUserMenu(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"><Bell className="w-3.5 h-3.5" />Notifications</button>
                   {!isStandalone() && <button onClick={() => { onInstallApp(); setUserMenu(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"><Download className="w-3.5 h-3.5" />Install app</button>}

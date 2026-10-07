@@ -1,7 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Eye, EyeOff, Lock } from 'lucide-react';
-import { post } from '../lib/api';
+import { post, probe } from '../lib/api';
 import { Button, inputCls, Notice } from './ui';
+
+/** Set when an admin starts a restore in this tab (all sessions end when it completes). */
+export const RESTORE_FLAG = 'qonnect.restoreStarted';
 
 export function Login({ onLoggedIn }: { onLoggedIn: (d: any) => void }) {
   const [email, setEmail] = useState('');
@@ -9,12 +12,19 @@ export function Login({ onLoggedIn }: { onLoggedIn: (d: any) => void }) {
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [maintenance, setMaintenance] = useState<string | null>(null);
+  const restoreStarted = (() => { try { return sessionStorage.getItem(RESTORE_FLAG) !== null; } catch { return false; } })();
+  useEffect(() => {
+    void probe<{ maintenance: boolean; message: string | null }>('/api/system/status').then((r) => setMaintenance(r.body?.maintenance ? r.body.message ?? 'Maintenance in progress' : null));
+  }, []);
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setErr(null);
     try {
-      onLoggedIn(await post('/api/auth/login', { email, password }));
+      const d = await post('/api/auth/login', { email, password });
+      try { sessionStorage.removeItem(RESTORE_FLAG); } catch { /* ignore */ }
+      onLoggedIn(d);
     } catch (ex) {
       setErr((ex as Error).message);
     } finally {
@@ -49,6 +59,8 @@ export function Login({ onLoggedIn }: { onLoggedIn: (d: any) => void }) {
             </button>
           </div>
         </div>
+        {maintenance && <Notice tone="amber">{maintenance}</Notice>}
+        {!maintenance && restoreStarted && <Notice tone="sky">A restore from a backup was started in this browser. If it has finished, sign in with an account from the restored backup.</Notice>}
         {err && <Notice tone="rose">{err}</Notice>}
         <Button type="submit" variant="primary" className="w-full" busy={busy}><Lock className="w-3.5 h-3.5" />Sign in</Button>
         <p className="text-[11px] text-slate-400 text-center">Accounts are created by an administrator.</p>

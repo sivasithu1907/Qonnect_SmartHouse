@@ -105,6 +105,6 @@ export interface ContractDetail extends Omit<Contract, 'payments'> {
 }
 export interface ContractsResponse { contracts: Contract[]; access: { finance: boolean; budget: boolean } }
 
-export type Section = 'portfolio' | 'dashboard' | 'budget' | 'payments' | 'contracts' | 'materials' | 'consultant' | 'site' | 'timeline' | 'contacts' | 'audit' | 'users' | 'notifications';
+export type Section = 'portfolio' | 'dashboard' | 'budget' | 'payments' | 'contracts' | 'materials' | 'consultant' | 'site' | 'timeline' | 'contacts' | 'audit' | 'users' | 'notifications' | 'backup';
 export interface FocusProps { focusId?: string | null; onFocusHandled?: () => void }
 export interface AppNotification { id: string; project_id: string; project_code: string; kind: string; event_type: string; title: string; body: string; url: string; read_at: string | null; created_at: string }

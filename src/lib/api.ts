@@ -43,3 +43,21 @@ export async function upload<T = any>(url: string, fields: Record<string, string
   const res = await fetch(url, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-CSRF-Token': csrfToken } });
   return handle<T>(res);
 }
+
+/** Raw binary PUT (chunked backup uploads). Returns status and parsed JSON without throwing on 409. */
+export async function putBinary(url: string, body: Blob): Promise<{ status: number; body: any }> {
+  const res = await fetch(url, { method: 'PUT', body, credentials: 'same-origin', headers: { 'X-CSRF-Token': csrfToken, 'Content-Type': 'application/octet-stream', Accept: 'application/json' } });
+  if (res.status === 401 && onUnauthorized) onUnauthorized();
+  const json = await res.json().catch(() => ({}));
+  return { status: res.status, body: json };
+}
+
+/** Fetch JSON without triggering the sign-out handler (used while a restore replaces all sessions). */
+export async function probe<T = any>(url: string): Promise<{ status: number; body: T | null }> {
+  try {
+    const res = await fetch(url, { credentials: 'same-origin', headers: { Accept: 'application/json' }, cache: 'no-store' });
+    return { status: res.status, body: await res.json().catch(() => null) };
+  } catch {
+    return { status: 0, body: null };
+  }
+}

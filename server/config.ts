@@ -34,6 +34,11 @@ export interface AppConfig {
   pushAllowedHosts: string[];      // host suffixes of trusted push services (SSRF protection)
   pushAllowInsecureEndpoints: boolean; // tests only
   notifySchedulerEnabled: boolean;
+  // Backup & Restore: private archive storage, outside UPLOAD_DIR and never served statically
+  backupDir: string;
+  backupRetention: number;      // successful backups of each kind kept on the server
+  backupMaxUploadMb: number;    // largest archive accepted for upload / validation
+  migrationsDir: string;
 }
 
 const DEFAULT_PUSH_HOSTS = [
@@ -68,6 +73,10 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     ],
     pushAllowInsecureEndpoints: false,
     notifySchedulerEnabled: bool('NOTIFY_SCHEDULER', nodeEnv === 'production'),
+    backupDir: path.resolve(process.env.BACKUP_DIR ?? './data/backups'),
+    backupRetention: Math.max(1, int('BACKUP_RETENTION', 10)),
+    backupMaxUploadMb: Math.max(1, int('BACKUP_MAX_UPLOAD_MB', 20480)),
+    migrationsDir: path.resolve(process.env.MIGRATIONS_DIR ?? './migrations'),
     ...overrides,
   };
 }
