@@ -13,8 +13,11 @@ import { checkDirectoryLinks, directoryJoin, directoryLinkFields, directorySelec
 export async function loadPayments(db: pg.Pool | pg.PoolClient, projectId: string, timeZone: string, includeArchived = false) {
   const [ms, txs, att] = await Promise.all([
     db.query(
-      `SELECT m.*, bi.name AS budget_item_name, ct.title AS contract_title, ${directorySelect('m')} FROM payment_milestones m
+      `SELECT m.*, bi.name AS budget_item_name, bi.archived_at AS budget_item_archived_at, ct.title AS contract_title, ${directorySelect('m')},
+              ec.id AS category_id, ec.name AS category_name, ec.kind AS category_kind, ec.archived_at AS category_archived_at
+         FROM payment_milestones m
          LEFT JOIN budget_items bi ON bi.id = m.budget_item_id AND bi.project_id = m.project_id
+         LEFT JOIN budget_categories ec ON ec.id = COALESCE(bi.category_id, m.budget_category_id) AND ec.project_id = m.project_id
          LEFT JOIN contracts ct ON ct.id = m.contract_id AND ct.project_id = m.project_id
          ${directoryJoin('m')}
         WHERE m.project_id = $1 AND ($2 OR m.archived_at IS NULL)
@@ -37,6 +40,7 @@ export async function loadPayments(db: pg.Pool | pg.PoolClient, projectId: strin
       .map((x) => ({ ...x, attachment_count: attCount.get(`payment_transaction:${x.id}`) ?? 0 }));
     return {
       ...m,
+      ...categoryView(m),
       transactions: t,
       attachment_count: attCount.get(`payment_milestone:${m.id}`) ?? 0,
       balance: milestoneBalance(m, t, today),
@@ -61,10 +65,27 @@ export async function loadPayments(db: pg.Pool | pg.PoolClient, projectId: strin
   };
 }
 
+const norm = (x: unknown) => String(x ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+/**
+ * Category shown for a payment: the linked budget item's category (authoritative), otherwise the stored category.
+ * The original free-text cost_category is never changed; it is reported as a legacy value needing review when it
+ * is set and does not match the effective category name.
+ */
+export function categoryView(m: Record<string, any>) {
+  const legacy = String(m.cost_category ?? '').trim();
+  return {
+    category_source: m.budget_item_id && m.category_id ? 'budget_item' : m.category_id ? 'category' : null,
+    category_label: m.category_name ?? (legacy ? `${legacy} (legacy)` : ''),
+    legacy_category: legacy && norm(legacy) !== norm(m.category_name) ? legacy : null,
+  };
+}
+
 const milestoneSchema = z.object({
   payee_type: z.enum(PAYEE_TYPES),
   payee_name: zText(200).min(1),
-  cost_category: zText(160).default(''),
+  // the free-text cost_category is legacy and no longer written; the category is a Master Items & Budget category
+  budget_category_id: z.preprocess((v) => (v === '' ? null : v), z.string().uuid().nullable()).optional(),
   budget_item_id: z.preprocess((v) => (v === '' ? null : v), z.string().uuid().nullable()).optional(),
   contract_id: z.preprocess((v) => (v === '' ? null : v), z.string().uuid().nullable()).optional(),
   po_contract_ref: zText(120).default(''),
@@ -92,6 +113,56 @@ async function assertLinkableContract(c: pg.PoolClient, projectId: string, contr
   await assertSameProject(c, 'contracts', projectId, contractId, 'Contract');
   const { rows } = await c.query('SELECT archived_at FROM contracts WHERE id = $1', [contractId]);
   if (rows[0]?.archived_at) throw badRequest('That contract is archived. Restore it before linking payments to it.');
+}
+
+/**
+ * Validates the category / budget item pair and returns the column values to write.
+ * - Item and category must belong to this project; archived ones are refused for new links only.
+ * - A linked item's category is authoritative: a different category is rejected.
+ * - Unlinking an item keeps its category unless another one is sent.
+ * - An edit that touches neither field writes neither (no silent reclassification).
+ */
+export async function resolveCategory(c: pg.PoolClient, pid: string, body: { budget_item_id?: string | null; budget_category_id?: string | null }, cur?: Record<string, any>) {
+  const out: { budget_item_id?: string | null; budget_category_id?: string | null } = {};
+  const itemGiven = body.budget_item_id !== undefined;
+  const catGiven = body.budget_category_id !== undefined;
+  if (!itemGiven && !catGiven) return out;
+  const itemId = itemGiven ? body.budget_item_id ?? null : (cur?.budget_item_id ?? null);
+  const itemChanged = itemGiven && itemId !== (cur?.budget_item_id ?? null);
+  const loadItem = async (id: string) => {
+    const { rows } = await c.query(
+      `SELECT bi.id, bi.project_id, bi.category_id, bi.archived_at, bc.archived_at AS cat_archived_at, bc.name AS category_name
+         FROM budget_items bi JOIN budget_categories bc ON bc.id = bi.category_id WHERE bi.id = $1`, [id]);
+    if (!rows[0] || rows[0].project_id !== pid) throw badRequest('Budget item not found in this project');
+    return rows[0];
+  };
+  if (itemId) {
+    const item = await loadItem(itemId);
+    if (itemChanged && (item.archived_at || item.cat_archived_at)) throw badRequest('That budget item or its category is archived. Choose an active item.');
+    if (catGiven && (body.budget_category_id ?? null) !== item.category_id) {
+      throw badRequest(`The linked budget item belongs to the category "${item.category_name}". Change or unlink the item to choose another category.`);
+    }
+    if (itemGiven) out.budget_item_id = itemId;
+    if (itemChanged || catGiven) out.budget_category_id = item.category_id;
+    return out;
+  }
+  // no budget item linked (after this change)
+  if (itemGiven) out.budget_item_id = null;
+  let catId: string | null | undefined = catGiven ? body.budget_category_id ?? null : undefined;
+  if (!catGiven && itemChanged && cur?.budget_item_id) {
+    // explicit unlink: keep the previous item's category as the selection
+    const prev = await c.query('SELECT category_id FROM budget_items WHERE id = $1 AND project_id = $2', [cur.budget_item_id, pid]);
+    catId = cur.budget_category_id ?? prev.rows[0]?.category_id ?? null;
+  }
+  if (catId !== undefined) {
+    if (catId) {
+      const { rows } = await c.query('SELECT project_id, archived_at FROM budget_categories WHERE id = $1', [catId]);
+      if (!rows[0] || rows[0].project_id !== pid) throw badRequest('Cost category not found in this project');
+      if (rows[0].archived_at && catId !== (cur?.budget_category_id ?? null)) throw badRequest('That cost category is archived. Choose an active category.');
+    }
+    out.budget_category_id = catId;
+  }
+  return out;
 }
 
 function isUniqueViolation(e: unknown) {
@@ -133,10 +204,10 @@ export function paymentRoutes(pool: pg.Pool, timeZone: string) {
     const body = parseBody(milestoneSchema, req);
     const pid = req.project!.id;
     const row = await withTx(pool, async (c) => {
-      await assertSameProject(c, 'budget_items', pid, body.budget_item_id, 'Budget item');
+      const cat = await resolveCategory(c, pid, body);
       await assertLinkableContract(c, pid, body.contract_id);
       await checkDirectoryLinks(c, pid, body);
-      const m = await insertRow(c, 'payment_milestones', { ...body, budget_item_id: body.budget_item_id ?? null, contract_id: body.contract_id ?? null, project_id: pid, created_by: req.user!.id });
+      const m = await insertRow(c, 'payment_milestones', { ...body, ...cat, budget_item_id: cat.budget_item_id ?? null, budget_category_id: cat.budget_category_id ?? null, contract_id: body.contract_id ?? null, project_id: pid, created_by: req.user!.id });
       await audit(c, req, { projectId: pid, action: 'create', entityType: 'payment_milestone', entityId: m.id as string, summary: `Scheduled payment "${body.description}" to ${body.payee_name}: QAR ${body.scheduled_amount}`, after: m });
       return m;
     });
@@ -149,11 +220,12 @@ export function paymentRoutes(pool: pg.Pool, timeZone: string) {
     const body = parsePatch(milestoneSchema.partial(), req);
     const pid = req.project!.id;
     const out = await withTx(pool, async (c) => {
-      if (body.budget_item_id) await assertSameProject(c, 'budget_items', pid, body.budget_item_id, 'Budget item');
-      const cur = await getOwned<Record<string, unknown>>(c, 'payment_milestones', pid, id);
+      const cur = await getOwned<Record<string, unknown>>(c, 'payment_milestones', pid, id, { forUpdate: true });
+      const cat = await resolveCategory(c, pid, body, cur);
       if (body.contract_id && cur.contract_id !== body.contract_id) await assertLinkableContract(c, pid, body.contract_id);
       await checkDirectoryLinks(c, pid, body as Record<string, unknown>, cur as never);
-      const { before, after } = await patchOwned(c, 'payment_milestones', pid, id, body);
+      const { budget_item_id: _i, budget_category_id: _c, ...rest } = body;
+      const { before, after } = await patchOwned(c, 'payment_milestones', pid, id, { ...rest, ...cat });
       const d = diff(before, after);
       await audit(c, req, { projectId: pid, action: 'update', entityType: 'payment_milestone', entityId: id, summary: `Edited payment milestone "${after.description}" (${d.changed.join(', ')})`, before: d.before, after: d.after });
       return after;

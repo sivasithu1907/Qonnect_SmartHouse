@@ -7,7 +7,7 @@ import type { FocusProps, BudgetResponse, ContractsResponse, PaymentMilestone, P
 import { formatDate, formatQAR, todayLocalISO } from '../lib/format';
 import { PAYEE_TYPE_LABELS, PAYEE_TYPES, PAYMENT_METHOD_LABELS, PAYMENT_METHODS } from '../../shared/constants';
 import { Attachments } from '../components/Attachments';
-import { budgetItemOptions } from '../lib/budgetOrder';
+import { BUDGET_KIND_TITLE, budgetItemOptions, sortBudgetCategories } from '../lib/budgetOrder';
 import { Badge, Button, Card, EmptyState, inputCls, Kpi, LinkButton, Modal, Notice, PageHeader, RecordForm, Spinner, StatusBadge, Table, Td, Th, useUi, type FieldSpec } from '../components/ui';
 import { DirectoryLinkBadge, useDirectoryLink } from '../components/directory/DirectoryLink';
 
@@ -27,21 +27,32 @@ export function Payments({ project, focusId, onFocusHandled }: { project: Projec
   const [q, setQ] = useState('');
   const [payee, setPayee] = useState('');
   const [status, setStatus] = useState('');
+  const [category, setCategory] = useState('');
   const writable = can('payments.write') && !project.archived_at;
   const { data: contracts } = useApi<ContractsResponse>(writable && can('contracts.read') ? `/api/projects/${project.id}/contracts` : null);
 
   const rows = useMemo(() => (data?.milestones ?? []).filter((m) => {
     const s = q.toLowerCase();
-    const txt = [m.payee_name, m.description, m.po_contract_ref, m.invoice_ref, m.cost_category, m.contract_title ?? '', ...m.transactions.map((t) => t.reference)].join(' ').toLowerCase();
-    return (!s || txt.includes(s)) && (!payee || m.payee_type === payee) && (!status || m.balance.derivedStatus === status);
-  }), [data, q, payee, status]);
+    const txt = [m.payee_name, m.description, m.po_contract_ref, m.invoice_ref, m.category_name ?? '', m.legacy_category ?? m.cost_category, m.budget_item_name ?? '', m.contract_title ?? '', ...m.transactions.map((t) => t.reference)].join(' ').toLowerCase();
+    const inCat = !category || (category === '_none' ? !m.category_id : category === '_legacy' ? !!m.legacy_category : m.category_id === category);
+    return (!s || txt.includes(s)) && (!payee || m.payee_type === payee) && (!status || m.balance.derivedStatus === status) && inCat;
+  }), [data, q, payee, status, category]);
 
   if (error) return <Notice tone="rose">{error}</Notice>;
   if (!data) return <Spinner />;
   const t = data.totals;
   // budget-page order; the record's current link stays listed (marked archived) if it was archived since
   const editingMilestone = edit?.kind === 'milestone' ? edit.row : null;
-  const budgetOptions = budgetItemOptions(budget?.categories ?? [], budget?.items ?? [], editingMilestone?.budget_item_id);
+  const cats = sortBudgetCategories(budget?.categories ?? []);
+  const items = budget?.items ?? [];
+  const keepCat = editingMilestone?.category_id ?? editingMilestone?.budget_category_id ?? null;
+  // Master Items & Budget categories in budget-page order; archived ones only when this record already uses them
+  const categoryOptions = cats.filter((c) => !c.archived_at || c.id === keepCat)
+    .map((c) => ({ value: c.id, label: c.name, group: BUDGET_KIND_TITLE[c.kind] ?? 'Other categories', archived: !!c.archived_at }));
+  const itemOptionsFor = (catId: string | null | undefined) =>
+    budgetItemOptions(catId ? cats.filter((c) => c.id === catId) : cats, items, editingMilestone?.budget_item_id);
+  const categoryName = (id: string | null | undefined) => cats.find((c) => c.id === id)?.name ?? (id && id === editingMilestone?.category_id ? editingMilestone?.category_name : null) ?? null;
+  const usedCategories = sortBudgetCategories(cats.filter((c) => (data?.milestones ?? []).some((m) => m.category_id === c.id)));
 
   const contractOptions = (contracts?.contracts ?? []).map((k) => ({ value: k.id, label: `${k.title} — ${k.company_name}`, group: k.category_name }));
 
@@ -49,10 +60,23 @@ export function Payments({ project, focusId, onFocusHandled }: { project: Projec
     { name: 'payee_type', label: 'Payee type', type: 'select', options: PAYEE_TYPES.map((p) => ({ value: p, label: PAYEE_TYPE_LABELS[p] })), required: true },
     { name: 'payee_name', label: 'Payee name', required: true },
     ...dir.fields(editingMilestone, { label: 'Directory payee', help: 'Optional. Entries assigned to this project in Contacts. Linking keeps the payee name as typed and does not change any amount or payment.' }),
-    { name: 'cost_category', label: 'Cost category' },
-    { name: 'budget_item_id', label: 'Related master budget item', type: 'searchselect', nullable: true, options: budgetOptions, wide: true,
-      noneLabel: 'No linked budget item', noMatchLabel: 'No matching items', searchPlaceholder: 'Search items or categories…',
-      fallbackLabel: editingMilestone?.budget_item_name ?? undefined, help: 'Optional. Linking does not change any amount or mark anything paid.' },
+    ...(editingMilestone?.legacy_category ? [{ name: '_legacy', label: '', type: 'custom' as const, render: () => (
+      <Notice tone="amber">Recorded cost category text: <b>“{editingMilestone.legacy_category}”</b>. It is kept as entered{editingMilestone.category_name ? ` and differs from the category “${editingMilestone.category_name}”` : ' and is not matched to a budget category'}. {editingMilestone.budget_item_id ? 'The linked budget item decides the category.' : 'Select a category below to classify this payment.'}</Notice>
+    ) }] : []),
+    { name: 'budget_category_id', label: 'Cost category', type: 'searchselect', nullable: true, options: categoryOptions,
+      noneLabel: 'Select category', noMatchLabel: 'No matching categories', searchPlaceholder: 'Search categories…',
+      fallbackLabel: editingMilestone?.category_name ?? undefined,
+      disabledFn: (v) => !!v.budget_item_id,
+      helpFn: (v) => v.budget_item_id
+        ? <>Set by the linked budget item ({categoryName(v.budget_category_id) ?? 'its category'}). To choose another category, change or unlink the budget item.</>
+        : v.budget_category_id ? <><b>No budget item linked.</b> The payment counts in project totals but not against a specific budget line.</>
+        : <>Categories come from Master Items &amp; Budget{can('categories.manage') ? ' (Manage categories)' : ''}. Choosing one narrows the budget items below.</> },
+    { name: 'budget_item_id', label: 'Related master budget item', type: 'searchselect', nullable: true, wide: true,
+      optionsFn: (v) => itemOptionsFor(v.budget_item_id ? null : v.budget_category_id),
+      onChangeSet: (id, set) => { const it = items.find((i) => i.id === id); if (it) set('budget_category_id', it.category_id); },
+      noneLabel: 'No budget item linked', noMatchLabel: 'No matching items', searchPlaceholder: 'Search items or categories…',
+      fallbackLabel: editingMilestone?.budget_item_name ?? undefined,
+      help: 'Optional. Linking a budget item assigns this payment to that budget line and sets the category. It does not change any amount or mark anything paid.' },
     { name: 'contract_id', label: 'Contract', type: 'searchselect', nullable: true, options: contractOptions, hidden: !contracts, help: 'Optional. Contracts from this project only. Linking does not change any amount.' },
     { name: 'po_contract_ref', label: 'PO / contract reference' },
     { name: 'invoice_ref', label: 'Invoice reference' },
@@ -121,6 +145,12 @@ export function Payments({ project, focusId, onFocusHandled }: { project: Projec
           <select className={`${inputCls} !w-auto`} value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="">All statuses</option>{['Unpaid', 'Partially paid', 'Paid', 'Overpaid', 'Overdue', 'On hold', 'Cancelled'].map((s) => <option key={s}>{s}</option>)}
           </select>
+          <select className={`${inputCls} !w-auto max-w-[16rem]`} value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Cost category">
+            <option value="">All cost categories</option>
+            {usedCategories.map((c) => <option key={c.id} value={c.id}>{c.name}{c.archived_at ? ' (archived)' : ''}</option>)}
+            <option value="_none">No category</option>
+            <option value="_legacy">Legacy text needing review</option>
+          </select>
           <label className="flex items-center gap-1.5 text-xs text-slate-600 ml-auto"><input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />Show archived</label>
         </div>
         {rows.length === 0 ? (
@@ -133,8 +163,8 @@ export function Payments({ project, focusId, onFocusHandled }: { project: Projec
                 <React.Fragment key={m.id}>
                   <tr id={`rec-${m.id}`} className={`${m.archived_at ? 'opacity-60' : ''} hover:bg-slate-50/60`}>
                     <Td><button onClick={() => setOpen((o) => ({ ...o, [m.id]: !o[m.id] }))} className="p-0.5 text-slate-500" aria-label="Toggle transfers">{open[m.id] ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}</button></Td>
-                    <Td><div className="font-semibold text-slate-900">{m.payee_name}</div><DirectoryLinkBadge row={m} className="block" /><div className="text-[11px] text-slate-500">{PAYEE_TYPE_LABELS[m.payee_type as keyof typeof PAYEE_TYPE_LABELS]}{m.cost_category ? ` · ${m.cost_category}` : ''}</div></Td>
-                    <Td><div>{m.description}</div>{m.budget_item_name && <div className="text-[11px] text-slate-500">Budget: {m.budget_item_name}</div>}{m.contract_title && <div className="text-[11px] text-slate-500">Contract: {can('contracts.read') ? <a href={`#/contracts/${project.id}/${m.contract_id}`} className="text-sky-700">{m.contract_title}</a> : m.contract_title}</div>}</Td>
+                    <Td><div className="font-semibold text-slate-900">{m.payee_name}</div><DirectoryLinkBadge row={m} className="block" /><div className="text-[11px] text-slate-500">{PAYEE_TYPE_LABELS[m.payee_type as keyof typeof PAYEE_TYPE_LABELS]}</div></Td>
+                    <Td><div>{m.description}</div><CategoryLine m={m} />{m.contract_title && <div className="text-[11px] text-slate-500">Contract: {can('contracts.read') ? <a href={`#/contracts/${project.id}/${m.contract_id}`} className="text-sky-700">{m.contract_title}</a> : m.contract_title}</div>}</Td>
                     <Td className="text-[11px]">{m.po_contract_ref && <div>PO/Contract: {m.po_contract_ref}</div>}{m.invoice_ref && <div>Invoice: {m.invoice_ref}</div>}</Td>
                     <Td className="whitespace-nowrap">{formatDate(m.due_date)}</Td>
                     <Td className="text-right font-mono">{formatQAR(m.scheduled_amount)}</Td>
@@ -191,7 +221,7 @@ export function Payments({ project, focusId, onFocusHandled }: { project: Projec
         title={edit?.kind === 'milestone' ? (edit.row ? 'Edit payment milestone' : 'Schedule payment milestone') : edit?.row ? 'Edit transfer' : 'Record actual transfer'}
         subtitle={edit?.kind === 'tx' ? `${edit.milestone.payee_name} — ${edit.milestone.description} · pending ${formatQAR(edit.milestone.balance.pending)}` : 'A scheduled milestone is not a payment. Record transfers separately when money is actually paid.'}>
         {edit?.kind === 'milestone' && (
-          <RecordForm fields={milestoneFields} initial={edit.row ?? { payee_type: 'contractor', status: 'active' }} mode={edit.row ? 'edit' : 'create'} onCancel={() => setEdit(null)}
+          <RecordForm fields={milestoneFields} initial={edit.row ? { ...edit.row, budget_category_id: edit.row.category_id ?? edit.row.budget_category_id ?? null } : { payee_type: 'contractor', status: 'active' }} mode={edit.row ? 'edit' : 'create'} onCancel={() => setEdit(null)}
             onSubmit={async (v) => {
               if (edit.row) await patch(`${base}/milestones/${edit.row.id}`, v); else await post(`${base}/milestones`, v);
               toast('Milestone saved'); setEdit(null); await reload();
@@ -204,6 +234,21 @@ export function Payments({ project, focusId, onFocusHandled }: { project: Projec
         )}
       </Modal>
       {dir.dialog}
+    </div>
+  );
+}
+
+/** Category and budget line of a payment, with legacy text and archived references kept visible. */
+export function CategoryLine({ m }: { m: PaymentMilestone }) {
+  return (
+    <div className="text-[11px] text-slate-500 space-y-0.5 mt-0.5" data-testid="payment-category">
+      {m.category_name ? (
+        <div>
+          <span className="font-semibold text-slate-600">{m.category_name}</span>{m.category_archived_at && <span className="text-rose-700"> (archived category)</span>}
+          {' · '}{m.budget_item_name ? <>Budget item: {m.budget_item_name}{m.budget_item_archived_at && <span className="text-rose-700"> (archived)</span>}</> : <span className="italic">No budget item linked</span>}
+        </div>
+      ) : m.budget_item_name ? <div>Budget item: {m.budget_item_name}</div> : !m.legacy_category && <div className="italic">No cost category</div>}
+      {m.legacy_category && <div className="text-amber-800">Legacy category text: “{m.legacy_category}” — needs review</div>}
     </div>
   );
 }

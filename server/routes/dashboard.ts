@@ -107,7 +107,7 @@ export async function projectDashboard(pool: pg.Pool, project: Record<string, an
   const today = todayISO(timeZone);
   const showFinance = can(role, 'budget.read') && can(role, 'payments.read');
   const upcomingEnd = addDaysISO(today, UPCOMING_DAYS - 1);
-  const [materials, timeline, cv, sv, cvWindow, svWindow, reportsMissing] = await Promise.all([
+  const [materials, timeline, cv, sv, cvWindow, svWindow, reportsMissing, siteActions] = await Promise.all([
     loadMaterials(pool, pid),
     loadTimeline(pool, pid),
     pool.query(
@@ -129,10 +129,12 @@ export async function projectDashboard(pool: pg.Pool, project: Record<string, an
           AND (COALESCE(CASE WHEN v.status = 'Completed' THEN v.actual_visit_at END, v.planned_at) AT TIME ZONE $2)::date BETWEEN $3 AND $4
         ORDER BY v.planned_at`, [pid, timeZone, today, upcomingEnd]) : { rows: [] },
     can(role, 'site.read') ? pool.query(
-      `SELECT v.id, (v.visit_at AT TIME ZONE $2)::date AS date, v.purpose, v.status, COALESCE(NULLIF(u.name, ''), v.assigned_name) AS who
+      `SELECT v.id, (COALESCE(CASE WHEN v.status = 'Completed' THEN v.actual_visit_at END, v.visit_at) AT TIME ZONE $2)::date AS date,
+              v.purpose, v.status, COALESCE(NULLIF(u.name, ''), NULLIF(v.assigned_name, ''), concat_ws(' · ', de.display_name, dc.name)) AS who
          FROM site_visits v LEFT JOIN users u ON u.id = v.assigned_user_id
+         LEFT JOIN directory_entries de ON de.id = v.directory_entry_id LEFT JOIN directory_contacts dc ON dc.id = v.directory_contact_id
         WHERE v.project_id = $1 AND v.archived_at IS NULL AND v.status IN ('Planned','Rescheduled','In Progress','Completed')
-          AND (v.visit_at AT TIME ZONE $2)::date BETWEEN $3 AND $4
+          AND (COALESCE(CASE WHEN v.status = 'Completed' THEN v.actual_visit_at END, v.visit_at) AT TIME ZONE $2)::date BETWEEN $3 AND $4
         ORDER BY v.visit_at`, [pid, timeZone, today, upcomingEnd]) : { rows: [] },
     // completed consultant visits (last 30 days) with no consultant report attached
     can(role, 'consultant.read') ? pool.query(
@@ -143,6 +145,14 @@ export async function projectDashboard(pool: pg.Pool, project: Record<string, an
           AND NOT EXISTS (SELECT 1 FROM attachments a WHERE a.project_id = v.project_id AND a.entity_type = 'consultant_visit'
                             AND a.entity_id = v.id AND a.kind = 'consultant_report' AND a.archived_at IS NULL)
         ORDER BY v.planned_at`, [pid, timeZone, addDaysISO(today, -30), today]) : { rows: [] },
+    // open site-visit follow-up actions past their due date (visit not archived or cancelled)
+    can(role, 'site.read') ? pool.query(
+      `SELECT a.id, a.description, a.due_date, a.visit_id, v.purpose, COALESCE(NULLIF(u.name, ''), a.responsible) AS who
+         FROM visit_actions a JOIN site_visits v ON v.id = a.visit_id AND v.project_id = a.project_id
+         LEFT JOIN users u ON u.id = a.responsible_user_id
+        WHERE a.project_id = $1 AND a.visit_type = 'site' AND a.status = 'Open' AND a.archived_at IS NULL
+          AND v.archived_at IS NULL AND v.status <> 'Cancelled' AND a.due_date IS NOT NULL AND a.due_date < $2
+        ORDER BY a.due_date`, [pid, today]) : { rows: [] },
   ]);
 
   let finance: Record<string, unknown> | null = null;
@@ -215,6 +225,7 @@ export async function projectDashboard(pool: pg.Pool, project: Record<string, an
     upcoming,
     tasks,
     consultantReportsMissing: reportsMissing.rows,
+    overdueSiteActions: siteActions.rows,
     finance,
     materials: { ...materialStats(materials.items, today), responsibility },
     upcomingConsultantVisits: cv.rows,
@@ -251,12 +262,12 @@ export function dashboardRoutes(pool: pg.Pool, timeZone: string) {
     const p = await loadPayments(pool, req.project!.id, timeZone);
     const rows: unknown[][] = [];
     for (const m of p.milestones) {
-      const base = [m.payee_type, m.payee_name, m.cost_category, m.budget_item_name ?? '', m.po_contract_ref, m.invoice_ref, m.description, m.due_date, m.scheduled_amount, m.balance.paid, m.balance.pending, m.balance.derivedStatus];
+      const base = [m.payee_type, m.payee_name, m.category_name ?? '', m.budget_item_name ?? (m.category_name ? 'No budget item linked' : ''), m.legacy_category ?? '', m.po_contract_ref, m.invoice_ref, m.description, m.due_date, m.scheduled_amount, m.balance.paid, m.balance.pending, m.balance.derivedStatus];
       if (!m.transactions.filter((t: any) => !t.archived_at).length) rows.push([...base, '', '', '', '', m.notes]);
       for (const t of m.transactions.filter((x: any) => !x.archived_at)) rows.push([...base, t.paid_date, t.method, t.reference, t.amount, t.notes || m.notes]);
     }
     sendCsv(res, `payments-${safeCode(req.project!.code)}.csv`,
-      ['Payee type', 'Payee', 'Cost category', 'Budget item', 'PO/Contract', 'Invoice', 'Milestone', 'Due date', 'Scheduled (QAR)', 'Total paid (QAR)', 'Pending (QAR)', 'Status', 'Transfer date', 'Method', 'Bank/cheque ref', 'Transfer amount (QAR)', 'Notes'],
+      ['Payee type', 'Payee', 'Cost category', 'Budget item', 'Legacy category text (needs review)', 'PO/Contract', 'Invoice', 'Milestone', 'Due date', 'Scheduled (QAR)', 'Total paid (QAR)', 'Pending (QAR)', 'Status', 'Transfer date', 'Method', 'Bank/cheque ref', 'Transfer amount (QAR)', 'Notes'],
       rows);
   });
 

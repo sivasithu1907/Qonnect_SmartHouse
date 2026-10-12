@@ -283,6 +283,12 @@ export interface FieldSpec {
   optionsFn?: (vals: Record<string, any>) => Option[];
   /** reset this field to empty when the named field changes */
   dependsOn?: string;
+  /** called after this field changes, to update related fields (e.g. a budget item sets its category) */
+  onChangeSet?: (v: any, set: (k: string, v: any) => void, vals: Record<string, any>) => void;
+  /** disabled while this returns true for the current form values; unlike `disabled`, the value is still submitted */
+  disabledFn?: (vals: Record<string, any>) => boolean;
+  /** help text computed from the current form values (replaces `help` when it returns something) */
+  helpFn?: (vals: Record<string, any>) => React.ReactNode;
   /** type 'custom': renders arbitrary content from the current form values (no value of its own) */
   render?: (vals: Record<string, any>, set: (k: string, v: any) => void) => React.ReactNode;
 }
@@ -529,6 +535,8 @@ export function RecordForm({ fields, initial, onSubmit, onCancel, submitLabel = 
     return next;
   });
   const shown = (f: FieldSpec) => !f.showWhen || f.showWhen(vals);
+  const dis = (f: FieldSpec) => !!(f.disabled || f.disabledFn?.(vals));
+  const setF = (f: FieldSpec, v: any) => { set(f.name, v); f.onChangeSet?.(v, set, vals); };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -581,40 +589,40 @@ export function RecordForm({ fields, initial, onSubmit, onCancel, submitLabel = 
             <div key={f.name} className={wide ? 'sm:col-span-2' : ''}>
               {t === 'checkbox' ? (
                 <label className="flex items-center gap-2 text-sm text-slate-700 mt-5">
-                  <input type="checkbox" checked={!!vals[f.name]} disabled={f.disabled} onChange={(e) => set(f.name, e.target.checked)} className="rounded border-slate-300" />
+                  <input type="checkbox" checked={!!vals[f.name]} disabled={dis(f)} onChange={(e) => setF(f, e.target.checked)} className="rounded border-slate-300" />
                   {f.label}
                 </label>
               ) : (
                 <>
                   <label htmlFor={id} className="block text-xs font-semibold text-slate-600 mb-1">{f.label}{f.required && <span className="text-rose-500"> *</span>}</label>
                   {t === 'textarea' ? (
-                    <textarea id={id} rows={3} className={inputCls} value={vals[f.name]} disabled={f.disabled} placeholder={f.placeholder} onChange={(e) => set(f.name, e.target.value)} />
+                    <textarea id={id} rows={3} className={inputCls} value={vals[f.name]} disabled={dis(f)} placeholder={f.placeholder} onChange={(e) => setF(f, e.target.value)} />
                   ) : t === 'select' ? (
-                    <select id={id} className={inputCls} data-empty={vals[f.name] === ''} value={vals[f.name]} disabled={f.disabled} onChange={(e) => set(f.name, e.target.value)}>
+                    <select id={id} className={inputCls} data-empty={vals[f.name] === ''} value={vals[f.name]} disabled={dis(f)} onChange={(e) => setF(f, e.target.value)}>
                       {f.nullable && <option value="">— None —</option>}
                       <OptionList options={f.options ?? []} />
                     </select>
                   ) : t === 'phone' ? (
-                    <PhoneInput id={id} value={vals[f.name]} disabled={f.disabled} onChange={(v) => set(f.name, v)} />
+                    <PhoneInput id={id} value={vals[f.name]} disabled={dis(f)} onChange={(v) => setF(f, v)} />
                   ) : t === 'checklist' ? (
                     <div id={id} role="group" aria-label={f.label} className="flex flex-wrap gap-1.5">
                       {(f.optionsFn ? f.optionsFn(vals) : f.options ?? []).map((o) => {
                         const on = (vals[f.name] as string[]).includes(o.value);
                         return (
                           <label key={o.value} className={`inline-flex items-center gap-1.5 min-h-9 px-2.5 py-1 rounded-lg border text-xs cursor-pointer ${on ? 'bg-sky-50 border-sky-300 text-sky-800 font-semibold' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}>
-                            <input type="checkbox" className="rounded border-slate-300" checked={on} disabled={f.disabled}
-                              onChange={(e) => set(f.name, e.target.checked ? [...vals[f.name], o.value] : (vals[f.name] as string[]).filter((x) => x !== o.value))} />
+                            <input type="checkbox" className="rounded border-slate-300" checked={on} disabled={dis(f)}
+                              onChange={(e) => setF(f, e.target.checked ? [...vals[f.name], o.value] : (vals[f.name] as string[]).filter((x) => x !== o.value))} />
                             {o.label}
                           </label>
                         );
                       })}
                     </div>
                   ) : t === 'searchselect' ? (
-                    <SearchSelect id={id} value={vals[f.name]} disabled={f.disabled} nullable={f.nullable} options={f.optionsFn ? f.optionsFn(vals) : f.options ?? []} onChange={(v) => set(f.name, v)}
+                    <SearchSelect id={id} value={vals[f.name]} disabled={dis(f)} nullable={f.nullable} options={f.optionsFn ? f.optionsFn(vals) : f.options ?? []} onChange={(v) => setF(f, v)}
                       noneLabel={f.noneLabel} noMatchLabel={f.noMatchLabel} fallbackLabel={f.fallbackLabel} searchPlaceholder={f.searchPlaceholder} ariaLabel={f.label} />
                   ) : t === 'multiselect' ? (
-                    <select id={id} multiple className={`${inputCls} h-32`} value={vals[f.name]} disabled={f.disabled}
-                      onChange={(e) => set(f.name, Array.from(e.target.selectedOptions).map((o) => o.value))}>
+                    <select id={id} multiple className={`${inputCls} h-32`} value={vals[f.name]} disabled={dis(f)}
+                      onChange={(e) => setF(f, Array.from(e.target.selectedOptions).map((o) => o.value))}>
                       <OptionList options={f.options ?? []} />
                     </select>
                   ) : (
@@ -626,14 +634,14 @@ export function RecordForm({ fields, initial, onSubmit, onCancel, submitLabel = 
                       min={t === 'money' || t === 'number' ? 0 : undefined}
                       value={vals[f.name]}
                       data-empty={vals[f.name] === ''}
-                      disabled={f.disabled}
+                      disabled={dis(f)}
                       placeholder={f.placeholder ?? (t === 'url' ? 'https://' : undefined)}
-                      onChange={(e) => set(f.name, e.target.value)}
+                      onChange={(e) => setF(f, e.target.value)}
                     />
                   )}
                 </>
               )}
-              {f.help && <p className="text-[11px] text-slate-500 mt-1">{f.help}</p>}
+              {(f.helpFn?.(vals) ?? f.help) && <p className="text-[11px] text-slate-500 mt-1">{f.helpFn?.(vals) ?? f.help}</p>}
             </div>
           );
         })}

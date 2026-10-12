@@ -13,6 +13,7 @@ export interface DashboardData {
   upcoming?: UpcomingItem[];
   tasks?: DashTask[];
   consultantReportsMissing?: Array<{ id: string; date: string; purpose: string; who: string | null }>;
+  overdueSiteActions?: Array<{ id: string; description: string; due_date: string; visit_id: string; purpose: string; who: string | null }>;
   finance: null | {
     controlBudget: number | null; controlBudgetConfirmed: boolean;
     approvedItemCount: number; itemCount: number;
@@ -126,16 +127,16 @@ export interface AttentionItem {
   days: number;
   /** number of records this issue covers (1 for a single record) and what they are */
   count: number;
-  unit: 'payment' | 'material' | 'task' | 'visit';
+  unit: 'payment' | 'material' | 'task' | 'visit' | 'action';
 }
 
-const UNIT_PLURAL: Record<AttentionItem['unit'], string> = { payment: 'payments', material: 'materials', task: 'tasks', visit: 'visits' };
+const UNIT_PLURAL: Record<AttentionItem['unit'], string> = { payment: 'payments', material: 'materials', task: 'tasks', visit: 'visits', action: 'follow-up actions' };
 /** e.g. "5 issues · 1 payment, 41 materials, 2 tasks" — issues listed vs records affected. */
 export function attentionSummary(items: AttentionItem[]): string {
   if (!items.length) return 'No issues';
   const per = new Map<AttentionItem['unit'], number>();
   for (const i of items) per.set(i.unit, (per.get(i.unit) ?? 0) + i.count);
-  const order: AttentionItem['unit'][] = ['payment', 'material', 'task', 'visit'];
+  const order: AttentionItem['unit'][] = ['payment', 'material', 'task', 'visit', 'action'];
   const parts = order.filter((u) => per.get(u)).map((u) => `${per.get(u)} ${per.get(u) === 1 ? u : UNIT_PLURAL[u]}`);
   return `${items.length} issue${items.length === 1 ? '' : 's'} · ${parts.join(', ')}`;
 }
@@ -185,6 +186,19 @@ export function buildAttention(d: DashboardData, opts: { formatDate: (iso: strin
     out.push({ key: `rep-${v.id}`, severity: 'warning', tag: 'Consultant report not attached', title: v.purpose,
       detail: `Visit completed ${opts.formatDate(v.date)} · no consultant report uploaded`, who: v.who || undefined,
       href: `#/consultant/${pid}/${v.id}`, actionLabel: 'Open visit', days: 0, count: 1, unit: 'visit' });
+  }
+  const acts = d.overdueSiteActions ?? [];
+  if (acts.length === 1) {
+    const a = acts[0];
+    const days = daysSince(a.due_date, today);
+    out.push({ key: `sact-${a.id}`, severity: 'warning', tag: 'Overdue site follow-up', title: a.description,
+      detail: `Due ${opts.formatDate(a.due_date)}${days ? ` · ${days} day${days === 1 ? '' : 's'} overdue` : ''} · from site visit “${a.purpose}”`, who: a.who || undefined,
+      href: `#/site/${pid}/${a.visit_id}`, actionLabel: 'Open visit', days, count: 1, unit: 'action' });
+  } else if (acts.length > 1) {
+    const days = Math.max(...acts.map((a) => daysSince(a.due_date, today)));
+    out.push({ key: 'sact', severity: 'warning', tag: 'Overdue site follow-ups', title: `${acts.length} open follow-up actions past their due date`,
+      detail: `Oldest due ${opts.formatDate(acts[0].due_date)} · from ${new Set(acts.map((a) => a.visit_id)).size} site visit${new Set(acts.map((a) => a.visit_id)).size === 1 ? '' : 's'}`,
+      href: `#/site/${pid}/filter:overdue-actions`, actionLabel: `Show these ${acts.length} actions`, days, count: acts.length, unit: 'action' });
   }
   if (d.materials.datesNeedReview) {
     const n = d.materials.datesNeedReview;

@@ -30,7 +30,7 @@ export function SetupRow({ i, onSettings, onNavigate }: { i: SetupItem; onSettin
 
 export const ATTENTION_LIMIT = 6;
 
-const UNIT_LABEL: Record<AttentionItem['unit'], [string, string]> = { payment: ['payment', 'payments'], material: ['material', 'materials'], task: ['task', 'tasks'], visit: ['visit', 'visits'] };
+const UNIT_LABEL: Record<AttentionItem['unit'], [string, string]> = { payment: ['payment', 'payments'], material: ['material', 'materials'], task: ['task', 'tasks'], visit: ['visit', 'visits'], action: ['follow-up action', 'follow-up actions'] };
 
 /** Issue groups with the number of records each one covers; "Showing X of Y" when only part of the list is visible. Content-sized. */
 export function NeedsAttention({ items }: { items: AttentionItem[] }) {

@@ -60,7 +60,7 @@ export const INSPECTION_STATUSES = ['', 'Not required', 'Pending', 'Passed', 'Co
 
 export const TASK_STATUSES = ['Not Scheduled', 'Scheduled', 'In Progress', 'On Hold', 'Blocked', 'Completed'] as const;
 export const CONSULTANT_VISIT_STATUSES = ['Planned', 'In Progress', 'Completed', 'Rescheduled', 'Cancelled'] as const;
-export const SITE_VISIT_STATUSES = ['Planned', 'In Progress', 'Completed', 'Rescheduled'] as const;
+export const SITE_VISIT_STATUSES = ['Planned', 'In Progress', 'Completed', 'Rescheduled', 'Cancelled'] as const;
 
 export const ATTACHMENT_ENTITY_TYPES = [
   'payment_milestone',
@@ -142,6 +142,15 @@ export type VisitState = 'Scheduled' | 'Completed' | 'Cancelled';
 export function visitState(status: string): VisitState {
   return status === 'Completed' ? 'Completed' : status === 'Cancelled' ? 'Cancelled' : 'Scheduled';
 }
+
+/** Site visits: stored statuses are kept; the interface shows four states. */
+export type SiteVisitState = 'Scheduled' | 'In progress' | 'Completed' | 'Cancelled';
+export function siteVisitState(status: string): SiteVisitState {
+  if (status === 'Completed') return 'Completed';
+  if (status === 'Cancelled') return 'Cancelled';
+  if (status === 'In Progress') return 'In progress';
+  return 'Scheduled'; // Planned, Rescheduled
+}
 export const ASSIGNMENT_STATUSES = ['active', 'on_hold', 'completed'] as const;
 export const ASSIGNMENT_STATUS_LABELS: Record<(typeof ASSIGNMENT_STATUSES)[number], string> = { active: 'Active', on_hold: 'On hold', completed: 'Completed' };
 export type AssignmentStatus = (typeof ASSIGNMENT_STATUSES)[number];
@@ -175,7 +184,7 @@ export const NOTIFICATION_EVENT_TYPES = [
 export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPES)[number];
 
 export const NOTIFICATION_EVENT_LABELS: Record<NotificationEventType, { label: string; help: string }> = {
-  site_visit: { label: 'Site visits', help: 'A site visit is assigned to you or rescheduled.' },
+  site_visit: { label: 'Site visits', help: 'A site visit is assigned to you, rescheduled or cancelled.' },
   consultant_visit: { label: 'Consultant visits', help: 'A consultant visit is assigned to you or rescheduled.' },
   task_assigned: { label: 'Timeline task assigned', help: 'A timeline task is assigned to you.' },
   task_due: { label: 'Timeline task due / overdue', help: 'A task you are responsible for is due within 3 days or overdue.' },

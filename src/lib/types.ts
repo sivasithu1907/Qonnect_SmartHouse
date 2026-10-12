@@ -40,6 +40,12 @@ export interface DirectoryLinked {
 }
 export interface PaymentMilestone extends DirectoryLinked {
   id: string; payee_type: string; payee_name: string; cost_category: string; budget_item_id: string | null; budget_item_name: string | null;
+  /** stored category reference (Master Items & Budget); the effective category is category_id */
+  budget_category_id?: string | null; budget_item_archived_at?: string | null;
+  category_id?: string | null; category_name?: string | null; category_kind?: string | null; category_archived_at?: string | null;
+  category_source?: 'budget_item' | 'category' | null; category_label?: string;
+  /** original free-text cost category that does not match the effective category (needs review) */
+  legacy_category?: string | null;
   contract_id: string | null; contract_title: string | null;
   po_contract_ref: string; invoice_ref: string; description: string; due_date: string | null; scheduled_amount: number;
   status: 'active' | 'on_hold' | 'cancelled'; notes: string; archived_at: string | null; attachment_count: number;
@@ -78,6 +84,11 @@ export interface SiteVisit extends DirectoryLinked {
   id: string; visit_at: string | null; assigned_user_id: string | null; assigned_user_name: string | null; assigned_name: string;
   purpose: string; areas: string; status: string; findings: string; related_task_id: string | null; related_material_id: string | null;
   related_consultant_visit_id: string | null; notes: string; archived_at: string | null; attachment_count: number; actions: VisitAction[];
+  decisions?: string; actual_visit_at?: string | null; started_at?: string | null; cancel_reason?: string;
+  visit_state?: 'Scheduled' | 'In progress' | 'Completed' | 'Cancelled'; open_action_count?: number; comment_count?: number;
+  related_task_name?: string | null; related_material_description?: string | null; related_consultant_visit_purpose?: string | null; related_consultant_visit_at?: string | null;
+  directory_contact_position?: string | null; directory_contact_mobile?: string | null; directory_contact_whatsapp?: string | null; directory_contact_email?: string | null;
+  directory_entry_phone?: string | null; directory_entry_email?: string | null; created_at?: string;
 }
 
 export interface Phase { id: string; seq: number; name: string; description: string; planned_start: string | null; planned_end: string | null; actual_start: string | null; actual_end: string | null; schedule_approved: boolean; notes: string; archived_at: string | null }

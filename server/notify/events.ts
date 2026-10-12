@@ -24,6 +24,9 @@ export function siteVisitEvents(before: Row | null, after: Row, actorId: string)
   if (!before || before.assigned_user_id !== uid) {
     return [{ ...base, kind: 'site_visit.assigned', dedupeKey: `site_visit.assigned:${after.id}:${uid}`, body: 'A site visit has been assigned to you.' }];
   }
+  if (before.status !== 'Cancelled' && after.status === 'Cancelled') {
+    return [{ ...base, kind: 'site_visit.cancelled', dedupeKey: `site_visit.cancelled:${after.id}:${iso(after.updated_at)}`, body: 'A site visit assigned to you has been cancelled.' }];
+  }
   const moved = before.visit_at && iso(before.visit_at) !== iso(after.visit_at);
   const markedRescheduled = before.status !== 'Rescheduled' && after.status === 'Rescheduled';
   if (moved || markedRescheduled) {

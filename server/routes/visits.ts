@@ -7,7 +7,7 @@ import { withTx } from '../db';
 import { audit, diff } from '../audit';
 import { assertProjectMember, assertSameProject, getOwned, insertRow, patchOwned } from '../lib/crud';
 import { can } from '../permissions';
-import { CONSULTANT_VISIT_STATUSES, SITE_VISIT_STATUSES, visitState } from '../../shared/constants';
+import { CONSULTANT_VISIT_STATUSES, SITE_VISIT_STATUSES, siteVisitState, visitState } from '../../shared/constants';
 import type { Notifier } from '../notify/notifier';
 import { consultantVisitEvents, siteVisitEvents } from '../notify/events';
 import { checkDirectoryLinks, directoryJoin, directoryLinkFields, directorySelect } from '../lib/directoryLinks';
@@ -42,10 +42,12 @@ const siteSchema = z.object({
   areas: zText(2000).default(''),
   status: z.enum(SITE_VISIT_STATUSES).default('Planned'),
   findings: zText(8000).default(''),
+  decisions: zText(8000).default(''),
   related_task_id: uuidOrNull,
   related_material_id: uuidOrNull,
   related_consultant_visit_id: uuidOrNull,
   notes: zText(4000).default(''),
+  actual_visit_at: zDateTime.optional(),
   ...directoryLinkFields,
 });
 
@@ -58,7 +60,7 @@ const actionSchema = z.object({
 });
 
 // Fields an assignee (contractor/consultant on a site visit) may update
-const SITE_ASSIGNEE_FIELDS = ['status', 'findings', 'notes'];
+const SITE_ASSIGNEE_FIELDS = ['status', 'findings', 'decisions', 'notes'];
 
 async function checkLinks(c: pg.PoolClient, pid: string, b: Record<string, unknown>) {
   await assertSameProject(c, 'payment_milestones', pid, b.related_milestone_id as string, 'Related payment');
@@ -66,6 +68,10 @@ async function checkLinks(c: pg.PoolClient, pid: string, b: Record<string, unkno
   await assertSameProject(c, 'timeline_tasks', pid, b.related_task_id as string, 'Related task');
   await assertSameProject(c, 'material_items', pid, b.related_material_id as string, 'Related material');
   await assertSameProject(c, 'consultant_visits', pid, b.related_consultant_visit_id as string, 'Related consultant visit');
+}
+
+function assertNotFuture(iso: string) {
+  if (Date.parse(iso) > Date.now() + 5 * 60_000) throw badRequest('The actual visit date and time cannot be in the future');
 }
 
 /** Can the user write this consultant visit? */
@@ -177,20 +183,38 @@ export function visitRoutes(pool: pg.Pool, notifier: Notifier) {
     const [v, a] = await Promise.all([
       pool.query(
         `SELECT v.*, u.name AS assigned_user_name, ${directorySelect('v')},
-                (SELECT count(*)::int FROM attachments x WHERE x.entity_type='site_visit' AND x.entity_id=v.id AND x.archived_at IS NULL) AS attachment_count
+                dc_v.position AS directory_contact_position, dc_v.mobile AS directory_contact_mobile, dc_v.whatsapp AS directory_contact_whatsapp, dc_v.email AS directory_contact_email,
+                de_v.phone AS directory_entry_phone, de_v.email AS directory_entry_email,
+                t.name AS related_task_name, mi.description AS related_material_description, cv.purpose AS related_consultant_visit_purpose, cv.planned_at AS related_consultant_visit_at,
+                (SELECT count(*)::int FROM attachments x WHERE x.entity_type='site_visit' AND x.entity_id=v.id AND x.archived_at IS NULL) AS attachment_count,
+                (SELECT count(*)::int FROM visit_comments cm WHERE cm.visit_type='site' AND cm.visit_id=v.id AND cm.archived_at IS NULL) AS comment_count
            FROM site_visits v LEFT JOIN users u ON u.id = v.assigned_user_id ${directoryJoin('v')}
+           LEFT JOIN timeline_tasks t ON t.id = v.related_task_id AND t.project_id = v.project_id
+           LEFT JOIN material_items mi ON mi.id = v.related_material_id AND mi.project_id = v.project_id
+           LEFT JOIN consultant_visits cv ON cv.id = v.related_consultant_visit_id AND cv.project_id = v.project_id
           WHERE v.project_id = $1 AND ($2 OR v.archived_at IS NULL) ORDER BY v.visit_at NULLS LAST, v.created_at`,
         [pid, inc],
       ),
       pool.query(`SELECT * FROM visit_actions WHERE project_id = $1 AND visit_type = 'site' AND archived_at IS NULL ORDER BY due_date NULLS LAST, created_at`, [pid]),
     ]);
-    res.json(v.rows.map((x) => ({ ...x, actions: a.rows.filter((y) => y.visit_id === x.id) })));
+    const role = req.user!.role;
+    res.json(v.rows.map((x) => {
+      const actions = a.rows.filter((y) => y.visit_id === x.id);
+      const row: Record<string, unknown> = { ...x, visit_state: siteVisitState(x.status), open_action_count: actions.filter((y) => y.status === 'Open').length, actions };
+      if (!can(role, 'directory.read')) for (const k of ['directory_contact_position', 'directory_contact_mobile', 'directory_contact_whatsapp', 'directory_contact_email', 'directory_entry_phone', 'directory_entry_email']) delete row[k];
+      if (!can(role, 'materials.read')) delete row.related_material_description;
+      if (!can(role, 'timeline.read')) delete row.related_task_name;
+      if (!can(role, 'consultant.read')) { delete row.related_consultant_visit_purpose; delete row.related_consultant_visit_at; }
+      return row;
+    }));
   });
 
   r.post('/site', async (req, res) => {
     assertCap(req, 'site.write');
     const body = parseBody(siteSchema, req);
     const pid = req.project!.id;
+    if (body.status === 'Cancelled') throw badRequest('Use "Cancel visit" on a saved visit; it records the reason.');
+    if (body.actual_visit_at) assertNotFuture(body.actual_visit_at);
     const row = await withTx(pool, async (c) => {
       await checkLinks(c, pid, body);
       await assertProjectMember(c, pid, body.assigned_user_id);
@@ -211,6 +235,8 @@ export function visitRoutes(pool: pg.Pool, notifier: Notifier) {
       const cur = await getOwned<{ assigned_user_id: string | null; directory_entry_id: string | null; directory_contact_id: string | null }>(c, 'site_visits', pid, id);
       if (!canWriteSiteVisit(req, cur)) throw forbidden();
       const patch = body;
+      if (body.status === 'Cancelled' && (cur as Record<string, unknown>).status !== 'Cancelled') throw badRequest('Use "Cancel visit"; it records the reason.');
+      if (body.actual_visit_at) assertNotFuture(body.actual_visit_at as string);
       if (!can(req.user!.role, 'site.write')) {
         const bad = Object.keys(body).filter((k) => body[k] !== undefined && !SITE_ASSIGNEE_FIELDS.includes(k));
         if (bad.length) throw forbidden(`You can only update: ${SITE_ASSIGNEE_FIELDS.join(', ')}`);
@@ -284,6 +310,75 @@ export function visitRoutes(pool: pg.Pool, notifier: Notifier) {
       `SELECT l.id, l.action, l.summary, l.created_at, COALESCE(u.name, l.user_email) AS who
          FROM audit_log l LEFT JOIN users u ON u.id = l.user_id
         WHERE l.project_id = $1 AND l.entity_type = 'consultant_visit' AND l.entity_id = $2
+        ORDER BY l.created_at DESC, l.id DESC LIMIT 200`, [pid, id]);
+    res.json(rows);
+  });
+
+  // ======================= site visit workflow
+  // Start / complete: managers and the assigned user. Reschedule / cancel: managers only (site.write).
+  const siteFlow = async (req: Request, id: string, full: boolean, change: (cur: Record<string, any>) => Record<string, unknown>, summary: (b: Record<string, any>, a: Record<string, any>) => string) => {
+    const pid = req.project!.id;
+    const out = await withTx(pool, async (c) => {
+      const cur = await getOwned<Record<string, any>>(c, 'site_visits', pid, id, { forUpdate: true });
+      if (!canWriteSiteVisit(req, cur as { assigned_user_id: string | null }, full)) throw forbidden(full ? 'Only a project manager can do this' : undefined);
+      if (cur.archived_at) throw badRequest('This visit is archived. Restore it first.');
+      const { before, after } = await patchOwned(c, 'site_visits', pid, id, change(cur));
+      const d = diff(before, after);
+      await audit(c, req, { projectId: pid, action: 'status', entityType: 'site_visit', entityId: id, summary: summary(before, after), before: d.before, after: d.after });
+      return { before, after };
+    });
+    notifier.emit(siteVisitEvents(out.before, out.after, req.user!.id));
+    return out.after;
+  };
+
+  r.post('/site/:id/start', async (req, res) => {
+    const id = uuidParam(req, 'id');
+    res.json(await siteFlow(req, id, false, (cur) => {
+      if (cur.status === 'Completed' || cur.status === 'Cancelled') throw badRequest(`A ${cur.status.toLowerCase()} visit cannot be started.`);
+      if (cur.status === 'In Progress') throw badRequest('This visit is already in progress.');
+      return { status: 'In Progress', started_at: nowIso() };
+    }, (_b, a) => `Started site visit "${a.purpose}"`));
+  });
+
+  r.post('/site/:id/complete', async (req, res) => {
+    const id = uuidParam(req, 'id');
+    const { actual_visit_at } = parseBody(z.object({ actual_visit_at: zDateTime.refine((v) => !!v, 'The actual visit date and time is required') }), req);
+    assertNotFuture(actual_visit_at as string);
+    res.json(await siteFlow(req, id, false, (cur) => {
+      if (cur.status === 'Cancelled') throw badRequest('A cancelled visit cannot be completed. Reschedule it first.');
+      if (cur.status === 'Completed') throw badRequest('This visit is already completed.');
+      return { status: 'Completed', actual_visit_at };
+    }, (_b, a) => `Marked site visit "${a.purpose}" completed (visited ${fmt(a.actual_visit_at)}); follow-up actions are unchanged`));
+  });
+
+  r.post('/site/:id/reschedule', async (req, res) => {
+    const id = uuidParam(req, 'id');
+    const { visit_at, reason } = parseBody(z.object({ visit_at: zDateTime.refine((v) => !!v, 'A new date and time is required'), reason: zText(1000).default('') }), req);
+    res.json(await siteFlow(req, id, true, (cur) => {
+      if (cur.status === 'Completed') throw badRequest('A completed visit cannot be rescheduled. Schedule a new visit instead.');
+      return { visit_at, status: 'Rescheduled', cancel_reason: '', started_at: null };
+    }, (b, a) => `Rescheduled site visit "${a.purpose}": ${fmt(b.visit_at)} → ${fmt(a.visit_at)}${b.status === 'Cancelled' ? ' (reopened after cancellation)' : ''}${reason ? ` — ${reason}` : ''}`));
+  });
+
+  r.post('/site/:id/cancel', async (req, res) => {
+    const id = uuidParam(req, 'id');
+    const { reason } = parseBody(z.object({ reason: zText(1000).min(1, 'A cancellation reason is required') }), req);
+    res.json(await siteFlow(req, id, true, (cur) => {
+      if (cur.status === 'Completed') throw badRequest('A completed visit cannot be cancelled.');
+      if (cur.status === 'Cancelled') throw badRequest('This visit is already cancelled.');
+      return { status: 'Cancelled', cancel_reason: reason };
+    }, (_b, a) => `Cancelled site visit "${a.purpose}" — ${reason}`));
+  });
+
+  r.get('/site/:id/history', async (req, res) => {
+    assertCap(req, 'site.read');
+    const id = uuidParam(req, 'id');
+    const pid = req.project!.id;
+    await getOwned(pool, 'site_visits', pid, id);
+    const { rows } = await pool.query(
+      `SELECT l.id, l.action, l.summary, l.created_at, COALESCE(u.name, l.user_email) AS who
+         FROM audit_log l LEFT JOIN users u ON u.id = l.user_id
+        WHERE l.project_id = $1 AND l.entity_type = 'site_visit' AND l.entity_id = $2
         ORDER BY l.created_at DESC, l.id DESC LIMIT 200`, [pid, id]);
     res.json(rows);
   });
