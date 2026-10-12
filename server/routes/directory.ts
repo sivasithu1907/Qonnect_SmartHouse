@@ -34,7 +34,9 @@ import { withTx } from '../db';
 import { audit, diff } from '../audit';
 import { can, type Capability } from '../permissions';
 import { BUSINESS_ROLES, DIRECTORY_DOCUMENT_KINDS, ENTITY_TYPES, findDuplicates, normalizePhone, similarNames, type DuplicateCandidate } from '../../shared/directory';
+import { ASSIGNMENT_STATUSES } from '../../shared/constants';
 import { contentDisposition, detectFileType, fileCsp, INLINE_TYPES, storedTypeMatches } from './attachments';
+import { effectiveFileName, sanitizeFileName } from '../../shared/filenames';
 
 type Db = pg.Pool | pg.PoolClient;
 type User = NonNullable<Request['user']>;
@@ -61,6 +63,7 @@ const contactSchema = z.object({
   name: zText(200).min(1, 'Name is required'),
   position: zText(120).default(''),
   mobile: zText(40).default(''),
+  whatsapp: zText(40).default(''),
   email: zEmail.default(''),
   is_primary: z.boolean().default(false),
   notes: zText(2000).default(''),
@@ -73,6 +76,7 @@ const assignmentSchema = z.object({
   start_date: zDate.optional(),
   end_date: zDate.optional(),
   notes: zText(2000).default(''),
+  status: z.enum(ASSIGNMENT_STATUSES).default('active'),
 });
 
 // ------------------------------------------------------------------ access helpers
@@ -183,7 +187,7 @@ async function relatedRecords(db: Db, user: User, entryId: string, projects: Pro
 
 async function listDocuments(db: Db, entryId: string, projectIds: string[]) {
   const { rows } = await db.query(
-    `SELECT a.id, a.project_id, a.kind, a.original_name, a.mime_type, a.size_bytes, a.created_at, u.name AS uploaded_by_name, p.code AS project_code
+    `SELECT a.id, a.project_id, a.kind, a.original_name, a.display_name, a.mime_type, a.size_bytes, a.created_at, u.name AS uploaded_by_name, p.code AS project_code
        FROM attachments a LEFT JOIN users u ON u.id = a.uploaded_by LEFT JOIN projects p ON p.id = a.project_id
       WHERE a.entity_type = 'directory_entry' AND a.entity_id = $1 AND a.archived_at IS NULL
         AND (a.project_id IS NULL OR a.project_id = ANY($2::uuid[]))
@@ -196,7 +200,7 @@ async function listDocuments(db: Db, entryId: string, projectIds: string[]) {
 // ------------------------------------------------------------------ routes
 export function directoryRoutes(pool: pg.Pool, cfg: AppConfig) {
   const r = Router();
-  const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: cfg.maxUploadMb * 1024 * 1024, files: 1, fields: 10 } });
+  const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: cfg.maxUploadMb * 1024 * 1024, files: 1, fields: 10 }, defParamCharset: 'utf8' });
 
   r.get('/', async (req, res) => {
     assertCap(req, 'directory.read');
@@ -233,13 +237,13 @@ export function directoryRoutes(pool: pg.Pool, cfg: AppConfig) {
     );
     const entryIds = rows.map((e) => e.id);
     const { rows: asg } = entryIds.length ? await pool.query(
-      `SELECT a.id, a.entry_id, a.project_id, a.roles, a.archived_at FROM directory_assignments a
+      `SELECT a.id, a.entry_id, a.project_id, a.roles, a.status, a.archived_at FROM directory_assignments a
         WHERE a.entry_id = ANY($1::uuid[]) AND a.project_id = ANY($2::uuid[]) ORDER BY a.created_at`, [entryIds, ids]) : { rows: [] };
     const pmap = new Map(projects.map((p) => [p.id, p]));
     res.json({
       entries: rows.map((e) => ({
         ...entryOut(e), primary_contact: e.primary_contact, contact_count: e.contact_count,
-        assignments: asg.filter((a) => a.entry_id === e.id).map((a) => ({ id: a.id, project_id: a.project_id, project_code: pmap.get(a.project_id)?.code ?? '', project_name: pmap.get(a.project_id)?.name ?? '', roles: a.roles, archived_at: a.archived_at })),
+        assignments: asg.filter((a) => a.entry_id === e.id).map((a) => ({ id: a.id, project_id: a.project_id, project_code: pmap.get(a.project_id)?.code ?? '', project_name: pmap.get(a.project_id)?.name ?? '', roles: a.roles, status: a.status, archived_at: a.archived_at })),
       })),
       projects,
       ...flags(user),
@@ -306,8 +310,11 @@ export function directoryRoutes(pool: pg.Pool, cfg: AppConfig) {
     const user = req.user!;
     const body = parseBody(entrySchema.extend({
       assign: z.object({ project_id: z.string().uuid(), roles: zRoles, scope: zText(4000).default('') }).optional(),
+      // initial contact people of a company (individuals don't need one)
+      contacts: z.array(contactSchema).max(20).default([]),
     }), req);
-    const { assign, ...data } = body;
+    const { assign, contacts, ...data } = body;
+    if (contacts.filter((x) => x.is_primary).length > 1) throw badRequest('Choose only one primary contact person');
     const out = await withTx(pool, async (c) => {
       await assertSpecializations(c, data.specializations);
       const project = assign ? await assertProjectWritable(c, user, assign.project_id) : null;
@@ -320,6 +327,15 @@ export function directoryRoutes(pool: pg.Pool, cfg: AppConfig) {
       );
       const e = rows[0];
       await audit(c, req, { projectId: null, action: 'create', entityType: 'directory_entry', entityId: e.id, summary: `Added directory entry ${e.ref} ${e.display_name}`, after: entryOut(e) });
+      const primaryIdx = contacts.findIndex((x) => x.is_primary);
+      for (let i = 0; i < contacts.length; i++) {
+        const k = contacts[i];
+        const { rows: cr } = await c.query(
+          `INSERT INTO directory_contacts (entry_id, name, position, mobile, mobile_normalized, whatsapp, whatsapp_normalized, email, is_primary, notes, created_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+          [e.id, k.name, k.position, k.mobile, normalizePhone(k.mobile), k.whatsapp, normalizePhone(k.whatsapp), k.email, primaryIdx === -1 ? i === 0 : i === primaryIdx, k.notes, user.id]);
+        await audit(c, req, { projectId: null, action: 'create', entityType: 'directory_contact', entityId: cr[0].id, summary: `Added contact ${k.name} to ${e.ref} ${e.display_name}`, after: cr[0] });
+      }
       let assignment = null;
       if (assign && project) {
         const a = await c.query(
@@ -416,9 +432,9 @@ export function directoryRoutes(pool: pg.Pool, cfg: AppConfig) {
       if (e.archived_at) throw conflict('This entry is archived');
       if (body.is_primary) await c.query('UPDATE directory_contacts SET is_primary = false, updated_at = now() WHERE entry_id = $1 AND is_primary', [id]);
       const { rows } = await c.query(
-        `INSERT INTO directory_contacts (entry_id, name, position, mobile, mobile_normalized, email, is_primary, notes, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-        [id, body.name, body.position, body.mobile, normalizePhone(body.mobile), body.email, body.is_primary, body.notes, req.user!.id]);
+        `INSERT INTO directory_contacts (entry_id, name, position, mobile, mobile_normalized, whatsapp, whatsapp_normalized, email, is_primary, notes, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+        [id, body.name, body.position, body.mobile, normalizePhone(body.mobile), body.whatsapp, normalizePhone(body.whatsapp), body.email, body.is_primary, body.notes, req.user!.id]);
       await audit(c, req, { projectId: null, action: 'create', entityType: 'directory_contact', entityId: rows[0].id, summary: `Added contact ${body.name} to ${e.ref} ${e.display_name}`, after: rows[0] });
       return rows[0];
     });
@@ -434,6 +450,7 @@ export function directoryRoutes(pool: pg.Pool, cfg: AppConfig) {
       if (!cur[0]) throw notFound('Contact not found');
       if (cur[0].archived_at) throw conflict('This contact is archived. Restore it before editing.');
       if (body.mobile !== undefined) body.mobile_normalized = normalizePhone(body.mobile as string);
+      if (body.whatsapp !== undefined) body.whatsapp_normalized = normalizePhone(body.whatsapp as string);
       if (body.is_primary === true) await c.query('UPDATE directory_contacts SET is_primary = false, updated_at = now() WHERE entry_id = $1 AND is_primary AND id <> $2', [cur[0].entry_id, cid]);
       const keys = Object.keys(body).filter((k) => body[k] !== undefined);
       if (!keys.length) return cur[0];
@@ -477,9 +494,9 @@ export function directoryRoutes(pool: pg.Pool, cfg: AppConfig) {
         await assertProjectWritable(c, user, body.project_id);
         await assertContactOfEntry(c, id, body.responsible_contact_id);
         const { rows } = await c.query(
-          `INSERT INTO directory_assignments (entry_id, project_id, roles, scope, responsible_contact_id, start_date, end_date, notes, created_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-          [id, body.project_id, body.roles, body.scope, body.responsible_contact_id ?? null, body.start_date ?? null, body.end_date ?? null, body.notes, user.id]);
+          `INSERT INTO directory_assignments (entry_id, project_id, roles, scope, responsible_contact_id, start_date, end_date, notes, status, created_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+          [id, body.project_id, body.roles, body.scope, body.responsible_contact_id ?? null, body.start_date ?? null, body.end_date ?? null, body.notes, body.status, user.id]);
         await audit(c, req, { projectId: body.project_id, action: 'create', entityType: 'directory_assignment', entityId: rows[0].id, summary: `Assigned ${e.ref} ${e.display_name} to this project`, after: rows[0] });
         return rows[0];
       });
@@ -573,7 +590,7 @@ export function directoryRoutes(pool: pg.Pool, cfg: AppConfig) {
     }
     const file = req.file;
     if (!file || !file.size) throw badRequest('A file is required');
-    const originalName = path.basename(file.originalname).replace(/[\u0000-\u001f"\\]/g, '_').slice(0, 200) || 'file';
+    const originalName = sanitizeFileName(file.originalname);
     const detected = detectFileType(file.buffer, originalName);
     if (!detected) throw new HttpError(415, 'Unsupported file type. Allowed: PDF, JPG, PNG, WEBP, HEIC, DOCX, XLSX.');
     const storedName = `${crypto.randomUUID()}${detected.ext}`;
@@ -626,7 +643,7 @@ export function directoryRoutes(pool: pg.Pool, cfg: AppConfig) {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, no-store, max-age=0');
     res.setHeader('Content-Security-Policy', fileCsp(a.mime_type, inline));
-    res.setHeader('Content-Disposition', contentDisposition(inline ? 'inline' : 'attachment', a.original_name));
+    res.setHeader('Content-Disposition', contentDisposition(inline ? 'inline' : 'attachment', effectiveFileName(a as { original_name: string; display_name?: string | null })));
     const stream = fs.createReadStream(full);
     stream.on('error', () => res.destroy());
     stream.pipe(res);

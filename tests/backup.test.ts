@@ -516,14 +516,14 @@ describe('older backups and maintenance mode', () => {
       const meta = await createBackup({ pool: old.pool, uploadDir: old.uploadDir, store, ops: null, app: oldApp }, { kind: 'manual', source: 'web', actor: null });
       expect(meta.status).toBe('verified');
       const rep = await validateArchive(store.archivePath(meta.id), { app: APP });
-      expect(rep.compatibility).toMatchObject({ compatible: true, status: 'older', pendingMigrations: ['007_directory.sql'] });
+      expect(rep.compatibility).toMatchObject({ compatible: true, status: 'older', pendingMigrations: APP.migrations.filter((m) => m.filename >= '007').map((m) => m.filename) });
       fresh.svc.store.ensure();
       const m2 = fresh.svc.store.newMeta('uploaded', null, 'old.tar', 'valid');
       fs.copyFileSync(store.archivePath(meta.id), fresh.svc.store.archivePath(m2.id));
       fresh.svc.store.writeMeta(m2);
       const done = await waitOp(fresh.svc, await fresh.svc.startRestore(m2.id, null));
       expect(done.error).toBeNull();
-      expect((done.result as { pendingMigrationsApplied: string[] }).pendingMigrationsApplied).toEqual(['007_directory.sql']);
+      expect((done.result as { pendingMigrationsApplied: string[] }).pendingMigrationsApplied).toEqual(APP.migrations.filter((m) => m.filename >= '007').map((m) => m.filename));
       expect((await fresh.pool.query(`SELECT filename FROM schema_migrations ORDER BY 1`)).rows.map((r) => r.filename)).toEqual(APP.migrations.map((m) => m.filename));
       expect((await fresh.pool.query(`SELECT count(*)::int n FROM directory_specializations`)).rows[0].n).toBe(10);
       expect((await login(fresh.app, 'old@test.local')).res.status).toBe(200);

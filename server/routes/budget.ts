@@ -2,7 +2,9 @@ import { Router } from 'express';
 import { z } from 'zod';
 import type pg from 'pg';
 import { assertCap } from '../auth';
-import { badRequest, parseBody, parsePatch, uuidParam, zMoney, zQty, zText } from '../lib/http';
+import { badRequest, parseBody, parsePatch, uuidParam, zMoney, zQty, zText, zUrl } from '../lib/http';
+import { can } from '../permissions';
+import { effectiveFileName } from '../../shared/filenames';
 import { withTx } from '../db';
 import { audit, diff } from '../audit';
 import { getOwned, insertRow, patchOwned } from '../lib/crud';
@@ -12,7 +14,7 @@ import { itemizedBudget, miscAllowance, sumMoney } from '../../shared/calc';
 // variant estimate columns may still exist in older databases but are never read or returned.
 export const BUDGET_ITEM_COLUMNS = [
   'id', 'project_id', 'category_id', 'name', 'description', 'quantity', 'unit', 'source_label',
-  'approved_amount', 'approved_by', 'approved_at', 'notes', 'sort_order', 'archived_at', 'created_at', 'updated_at',
+  'approved_amount', 'approved_by', 'approved_at', 'notes', 'drive_url', 'sort_order', 'archived_at', 'created_at', 'updated_at',
 ] as const;
 const ITEM_SELECT = BUDGET_ITEM_COLUMNS.join(', ');
 
@@ -24,7 +26,7 @@ export function publicBudgetItem(row: Record<string, unknown>) {
 }
 
 export async function loadBudget(db: pg.Pool | pg.PoolClient, projectId: string) {
-  const [cats, items, paidByItem, schedByItem] = await Promise.all([
+  const [cats, items, paidByItem, schedByItem, files] = await Promise.all([
     db.query('SELECT * FROM budget_categories WHERE project_id = $1 ORDER BY sort_order, created_at', [projectId]),
     db.query(`SELECT ${ITEM_SELECT} FROM budget_items WHERE project_id = $1 ORDER BY sort_order, created_at`, [projectId]),
     db.query(
@@ -40,10 +42,16 @@ export async function loadBudget(db: pg.Pool | pg.PoolClient, projectId: string)
         GROUP BY budget_item_id`,
       [projectId],
     ),
+    db.query(
+      `SELECT entity_id, count(*)::int AS n FROM attachments
+        WHERE project_id = $1 AND entity_type = 'budget_item' AND archived_at IS NULL GROUP BY entity_id`,
+      [projectId],
+    ),
   ]);
+  const fileCount = new Map(files.rows.map((r) => [r.entity_id, r.n as number]));
   const paid = new Map(paidByItem.rows.map((r) => [r.budget_item_id, Number(r.paid)]));
   const sched = new Map(schedByItem.rows.map((r) => [r.budget_item_id, Number(r.scheduled)]));
-  const itemRows = items.rows.map((i) => ({ ...i, paid_amount: paid.get(i.id) ?? 0, scheduled_amount: sched.get(i.id) ?? 0 }));
+  const itemRows = items.rows.map((i) => ({ ...i, paid_amount: paid.get(i.id) ?? 0, scheduled_amount: sched.get(i.id) ?? 0, attachment_count: fileCount.get(i.id) ?? 0 }));
   return { categories: cats.rows, items: itemRows };
 }
 
@@ -99,6 +107,7 @@ const itemSchema = z.object({
   source_label: zText(200).default(''),
   approved_amount: zMoney.optional(),
   notes: zText(4000).default(''),
+  drive_url: zUrl.default(''),
   sort_order: z.number().int().min(0).max(10000).optional(),
 });
 
@@ -115,6 +124,42 @@ export function budgetRoutes(pool: pg.Pool) {
     assertCap(req, 'budget.read');
     const b = await loadBudget(pool, req.project!.id);
     res.json({ ...b, summary: budgetSummary(req.project!, b) });
+  });
+
+  // Documents related to one budget item that live on other records (contracts linked to the item, payment
+  // milestones linked to the item and their transfers). They are listed with a link to the original record and
+  // are never copied; each part follows its own read permission.
+  r.get('/items/:id/related', async (req, res) => {
+    assertCap(req, 'budget.read');
+    const id = uuidParam(req, 'id');
+    const pid = req.project!.id;
+    await getOwned(pool, 'budget_items', pid, id);
+    const role = req.user!.role;
+    const fileSql = (types: string, idsSql: string) =>
+      `SELECT a.id, a.entity_type, a.entity_id, a.kind, a.original_name, a.display_name, a.mime_type, a.size_bytes, a.created_at
+         FROM attachments a WHERE a.project_id = $1 AND a.archived_at IS NULL AND a.entity_type IN (${types}) AND a.entity_id IN (${idsSql})
+        ORDER BY a.created_at DESC`;
+    const out: { contracts: unknown[]; milestones: unknown[]; files: unknown[] } = { contracts: [], milestones: [], files: [] };
+    if (can(role, 'contracts.read')) {
+      out.contracts = (await pool.query('SELECT id, title, company_name, status, archived_at FROM contracts WHERE project_id = $1 AND budget_item_id = $2 ORDER BY created_at', [pid, id])).rows;
+      const f = await pool.query(fileSql(`'contract'`, 'SELECT id FROM contracts WHERE project_id = $1 AND budget_item_id = $2'), [pid, id]);
+      out.files.push(...f.rows.map((a) => ({ ...a, name: effectiveFileName(a), source: 'contract', href: `#/contracts/${pid}/${a.entity_id}` })));
+    }
+    if (can(role, 'payments.read')) {
+      out.milestones = (await pool.query('SELECT id, payee_name, description, status, due_date, archived_at FROM payment_milestones WHERE project_id = $1 AND budget_item_id = $2 ORDER BY created_at', [pid, id])).rows;
+      const f = await pool.query(
+        `SELECT a.id, a.entity_type, a.entity_id, a.kind, a.original_name, a.display_name, a.mime_type, a.size_bytes, a.created_at,
+                COALESCE(t.milestone_id, m.id) AS milestone_id
+           FROM attachments a
+           LEFT JOIN payment_transactions t ON a.entity_type = 'payment_transaction' AND t.id = a.entity_id
+           LEFT JOIN payment_milestones m ON a.entity_type = 'payment_milestone' AND m.id = a.entity_id
+          WHERE a.project_id = $1 AND a.archived_at IS NULL
+            AND ((a.entity_type = 'payment_milestone' AND m.budget_item_id = $2)
+              OR (a.entity_type = 'payment_transaction' AND t.milestone_id IN (SELECT id FROM payment_milestones WHERE project_id = $1 AND budget_item_id = $2)))
+          ORDER BY a.created_at DESC`, [pid, id]);
+      out.files.push(...f.rows.map((a) => ({ ...a, name: effectiveFileName(a), source: a.entity_type, href: `#/payments/${pid}/${a.milestone_id}` })));
+    }
+    res.json(out);
   });
 
   // ---- items (categories are managed in routes/categories.ts)

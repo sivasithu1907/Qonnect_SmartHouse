@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { Archive, ArrowDown, ArrowUp, Ban, CheckCircle2, ChevronDown, Circle, CircleDot, ExternalLink, FileSignature, FileText, Hourglass, Pencil, Plus, RotateCcw, Search } from 'lucide-react';
-import { patch, post } from '../../lib/api';
+import { patch, post, upload } from '../../lib/api';
 import { useApi } from '../../lib/hooks';
 import { useSession } from '../../lib/session';
 import type { ContractsResponse, Member, Project, Section as AppSection } from '../../lib/types';
 import type { SetupItem } from '../../lib/projectHealth';
 import { checklistCounts, type Prerequisite } from '../../lib/dashboard';
 import { formatDate, formatDateTime } from '../../lib/format';
-import { PREREQUISITE_STATUSES } from '../../../shared/constants';
+import { PREREQUISITE_STATUSES, PROJECT_DOCUMENT_CATEGORIES, PROJECT_DOCUMENT_CATEGORY_LABELS } from '../../../shared/constants';
 import { Attachments } from '../Attachments';
 import { SetupRow } from '../ProjectHealth';
 import { InfoPopover } from '../InfoPopover';
@@ -64,9 +64,13 @@ function Collapsible({ id, title, summary, done, total, open, onToggle, actions,
   );
 }
 
-/** Project setup (administrative data entry) and Prerequisites & documents, each collapsible on its own. */
-export function ProjectChecklist({ project, setup, phases, today, onSettings, onNavigate }: {
+/** Project setup (administrative data entry) and construction prerequisites (evidence lives in Project Documents), each collapsible on its own. */
+export function ProjectChecklist({ project, setup, phases, today, onSettings, onNavigate, focusId, onFocusHandled, defaultOpen = false }: {
   project: Project; setup: SetupItem[]; phases: PhaseOption[]; today: string; onSettings: () => void; onNavigate: (s: AppSection) => void;
+  /** a prerequisite id from a link (#/dashboard/<project>/<prerequisite>) opens its details */
+  focusId?: string | null; onFocusHandled?: () => void;
+  /** both sections start collapsed (compact dashboard); each user's choice is remembered per project */
+  defaultOpen?: boolean;
 }) {
   const { can, user } = useSession();
   const canRead = can('prerequisites.read');
@@ -76,13 +80,23 @@ export function ProjectChecklist({ project, setup, phases, today, onSettings, on
   const { data, error, reload } = useApi<Prerequisite[]>(canRead ? `${base}${showArchived ? '?includeArchived=1' : ''}` : null);
   const { data: members } = useApi<Member[]>(writable ? `/api/projects/${project.id}/members` : null);
   const { data: contracts } = useApi<ContractsResponse>(writable && can('contracts.read') ? `/api/projects/${project.id}/contracts` : null);
-  const [setupOpen, setSetupOpen] = useRememberedOpen(checklistPrefKey(user?.id ?? 'anon', project.id, 'setup'), true);
-  const [preOpen, setPreOpen] = useRememberedOpen(checklistPrefKey(user?.id ?? 'anon', project.id, 'prerequisites'), true);
+  const [setupOpen, setSetupOpen] = useRememberedOpen(checklistPrefKey(user?.id ?? 'anon', project.id, 'setup'), defaultOpen);
+  const [preOpen, setPreOpen] = useRememberedOpen(checklistPrefKey(user?.id ?? 'anon', project.id, 'prerequisites'), defaultOpen);
   const [filter, setFilter] = useState<Filter>('all');
   const [q, setQ] = useState('');
   const [detailId, setDetailId] = useState<string | null>(null);
   const [edit, setEdit] = useState<{ row: Prerequisite | null } | null>(null);
   const { toast, confirm } = useUi();
+
+  useEffect(() => {
+    if (!focusId || !data) return;
+    if (data.some((p) => p.id === focusId)) {
+      setPreOpen(true);
+      setDetailId(focusId);
+      setTimeout(() => document.getElementById('ck-pre-title')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 50);
+    }
+    onFocusHandled?.();
+  }, [focusId, data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const all = data ?? [];
   const active = all.filter((p) => !p.archived_at);
@@ -93,7 +107,7 @@ export function ProjectChecklist({ project, setup, phases, today, onSettings, on
     const done = p.status === 'Completed';
     const na = p.status === 'Not applicable';
     const f = filter === 'all' || (filter === 'completed' ? done : !done && !na);
-    return f && (!s || `${p.title} ${p.phase_name ?? ''} ${p.responsible_display ?? ''} ${p.status} ${p.contract_title ?? ''}`.toLowerCase().includes(s));
+    return f && (!s || `${p.title} ${p.phase_name ?? ''} ${p.responsible_display ?? ''} ${p.status} ${p.contract_title ?? ''} ${(p.documents ?? []).map((d) => d.title).join(' ')}`.toLowerCase().includes(s));
   });
   const detail = all.find((p) => p.id === detailId) ?? null;
 
@@ -148,13 +162,14 @@ export function ProjectChecklist({ project, setup, phases, today, onSettings, on
           : <ul className="divide-y divide-slate-100">{setup.map((i) => <SetupRow key={i.key} i={i} onSettings={onSettings} onNavigate={onNavigate} />)}</ul>}
       </Collapsible>
 
-      <Collapsible id="ck-pre" title="Prerequisites & documents" open={preOpen} onToggle={() => setPreOpen(!preOpen)}
+      <Collapsible id="ck-pre" title="Construction prerequisites" open={preOpen} onToggle={() => setPreOpen(!preOpen)}
         done={counts.preDone} total={counts.preApplicable}
         summary={!canRead ? 'Not available for your role'
           : !data ? 'Loading…'
           : active.length === 0 ? 'No items yet'
           : `${counts.preDone} of ${counts.preApplicable} complete${counts.notApplicable ? ` · ${counts.notApplicable} N/A` : ''}`}
         actions={canRead && active.length > 0 ? addBtn : null}>
+        {canRead && <p className="pt-3 text-xs text-slate-500">Each item is a requirement; its evidence is a document in <a className="font-semibold text-sky-700" href={`#/contracts/${project.id}/filter:documents`}>Contracts &amp; Documents → Project documents</a>. Uploading evidence never changes an item’s status.</p>}
         {!canRead ? <p className="py-3 text-sm text-slate-500">Prerequisites are visible to admins, project managers and viewers.</p>
           : error ? <div className="pt-3"><Notice tone="rose">{error}</Notice></div>
           : !data ? <p className="py-3 text-sm text-slate-400">Loading…</p>
@@ -252,12 +267,13 @@ export function ProjectChecklist({ project, setup, phases, today, onSettings, on
 
 function DocumentChip({ p, onOpen }: { p: Prerequisite; onOpen: () => void }) {
   const cls = 'inline-flex max-w-[16rem] items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:border-sky-300 hover:text-sky-700 min-h-8';
-  const n = p.attachment_count + (p.document_url ? 1 : 0);
+  const n = p.attachment_count + (p.document_url ? 1 : 0) + (p.documents?.length || p.document_link_count || 0);
   if (p.contract_id && p.contract_title) {
     return <button type="button" onClick={onOpen} className={cls} title={`Linked contract: ${p.contract_title}`}><FileSignature className="w-3.5 h-3.5 shrink-0" /><span className="truncate">Contract: {p.contract_title}</span>{n > 0 && <span className="text-slate-500">+{n}</span>}</button>;
   }
   if (p.contract_linked) return <button type="button" onClick={onOpen} className={cls}><FileSignature className="w-3.5 h-3.5 shrink-0" /><span className="truncate">Linked contract</span></button>;
-  if (n > 0) return <button type="button" onClick={onOpen} className={cls}><FileText className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{n} document{n === 1 ? '' : 's'}</span></button>;
+  const parts = [(p.documents?.length || p.document_link_count) && `${p.documents?.length || p.document_link_count} linked project document(s)`, p.attachment_count && `${p.attachment_count} earlier file(s)`, p.document_url && 'a document link'].filter(Boolean).join(', ');
+  if (n > 0) return <button type="button" onClick={onOpen} className={cls} title={`Evidence: ${parts}`} aria-label={`Evidence: ${parts}. Open details`}><FileText className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{n} document{n === 1 ? '' : 's'}</span></button>;
   if (p.status === 'Not applicable') return null;
   return <span className="inline-flex items-center rounded-lg border border-dashed border-slate-200 px-2.5 py-1 text-xs text-slate-400 min-h-8">No document attached</span>;
 }
@@ -343,11 +359,12 @@ function PrerequisiteDetails({ project, p, today, writable, onClose, onEdit, onA
           </div>
         )}
 
-        <div>
-          <Attachments projectId={project.id} entityType="prerequisite" entityId={p.id} defaultKind="supporting_document" title="Uploaded documents"
-            canUpload={editable} onChange={() => void onChanged()} />
-          <p className="text-[11px] text-slate-500 mt-1">Uploading or opening a document doesn’t mark this item completed or approved.</p>
-        </div>
+        <EvidenceDocuments project={project} p={p} editable={editable} onChanged={onChanged} onClose={onClose} />
+        {p.attachment_count > 0 && (
+          <Attachments projectId={project.id} entityType="prerequisite" entityId={p.id} defaultKind="supporting_document" title="Files attached directly (earlier)"
+            canUpload={editable} noUpload onChange={() => void onChanged()}
+            hint="Uploaded before documents were kept in Contracts & Documents. They stay here and are also listed under Project documents → All project files." />
+        )}
 
         {editable && (
           <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-3">
@@ -357,5 +374,90 @@ function PrerequisiteDetails({ project, p, today, writable, onClose, onEdit, onA
         )}
       </div>
     </Modal>
+  );
+}
+
+const CATEGORY_OPTIONS = PROJECT_DOCUMENT_CATEGORIES.map((c) => ({ value: c, label: PROJECT_DOCUMENT_CATEGORY_LABELS[c] }));
+
+/**
+ * The prerequisite (a requirement) references documents (evidence) kept once in Contracts & Documents.
+ * Upload here creates that project document; linking an existing one never copies a file. Neither changes the status.
+ */
+function EvidenceDocuments({ project, p, editable, onChanged, onClose }: { project: Project; p: Prerequisite; editable: boolean; onChanged: () => Promise<void>; onClose: () => void }) {
+  const { can } = useSession();
+  const canDocs = can('documents.read');
+  const canUploadDocs = editable && can('documents.write');
+  const base = `/api/projects/${project.id}/prerequisites/${p.id}`;
+  const { data: reg, reload: reloadReg } = useApi<{ documents: Array<{ id: string; title: string; category: string; archived_at: string | null }> }>(editable && canDocs ? `/api/projects/${project.id}/documents` : null);
+  const [category, setCategory] = useState('approval');
+  const [title, setTitle] = useState('');
+  const [linkId, setLinkId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const fileRef = React.useRef<HTMLInputElement>(null);
+  const { toast, confirm } = useUi();
+  const linked = p.documents ?? [];
+  const linkable = (reg?.documents ?? []).filter((d) => !d.archived_at && !linked.some((x) => x.id === d.id));
+  const run = async (fn: () => Promise<unknown>, msg: string) => {
+    setBusy(true);
+    try { await fn(); toast(msg); await onChanged(); await reloadReg(); } catch (e) { toast((e as Error).message, 'error'); } finally { setBusy(false); }
+  };
+  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    await run(() => upload(`${base}/upload`, { category, ...(title.trim() ? { title: title.trim() } : {}) }, f), `Uploaded ${f.name} to Project documents and linked it`);
+    setTitle('');
+  };
+  if (!canDocs) {
+    const n = p.document_link_count ?? 0;
+    return n ? <p className="text-xs text-slate-500">{n} project document{n === 1 ? ' is' : 's are'} linked. Project documents are not available for your role.</p> : null;
+  }
+  return (
+    <section className="space-y-2" aria-labelledby={`ev-${p.id}`}>
+      <h4 id={`ev-${p.id}`} className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Evidence documents</h4>
+      {linked.length === 0 ? <p className="text-xs text-slate-500">No project document linked yet.</p> : (
+        <ul className="space-y-1.5">
+          {linked.map((d) => (
+            <li key={d.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white p-2.5">
+              <FileText className="w-4 h-4 text-sky-600 shrink-0" />
+              <a href={`#/contracts/${project.id}/${d.id}`} onClick={onClose} className="min-w-0 flex-1 no-underline">
+                <span className="block text-sm font-semibold text-slate-900 break-words" dir="auto">{d.title}</span>
+                <span className="block text-xs text-slate-500">{PROJECT_DOCUMENT_CATEGORY_LABELS[d.category as keyof typeof PROJECT_DOCUMENT_CATEGORY_LABELS] ?? d.category} · {d.file_count} file{d.file_count === 1 ? '' : 's'}{d.archived_at ? ' · archived' : ''} · in Contracts &amp; Documents</span>
+              </a>
+              {editable && <Button size="sm" variant="ghost" disabled={busy} aria-label={`Remove link to ${d.title}`}
+                onClick={async () => { if (await confirm(<>Remove the link to <b dir="auto">{d.title}</b>? The document and its files stay in Contracts &amp; Documents.</>, { title: 'Remove link', confirmLabel: 'Remove link' })) await run(() => post(`${base}/documents/${d.id}/unlink`), 'Link removed'); }}>Unlink</Button>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {editable && (
+        <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50/60 p-2.5 sm:grid-cols-2">
+          {canUploadDocs && (
+            <div className="space-y-1.5">
+              <p className="text-xs font-semibold text-slate-700">Upload a new document</p>
+              <input dir="auto" className={`${inputCls} !text-xs`} placeholder="Title (optional — file name is used)" value={title} onChange={(e) => setTitle(e.target.value)} aria-label="Document title" />
+              <div className="flex gap-2">
+                <select className={`${inputCls} !text-xs`} value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Document category">
+                  {CATEGORY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+                <input ref={fileRef} type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.docx,.xlsx" onChange={onFile} />
+                <Button size="sm" variant="primary" busy={busy} onClick={() => fileRef.current?.click()}>Upload</Button>
+              </div>
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <p className="text-xs font-semibold text-slate-700">Link an existing project document</p>
+            <div className="flex gap-2">
+              <select className={`${inputCls} !text-xs`} value={linkId} onChange={(e) => setLinkId(e.target.value)} aria-label="Existing project document">
+                <option value="">{linkable.length ? 'Choose a document…' : 'No other documents'}</option>
+                {linkable.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}
+              </select>
+              <Button size="sm" disabled={!linkId || busy} onClick={async () => { await run(() => post(`${base}/documents`, { document_id: linkId }), 'Document linked'); setLinkId(''); }}>Link</Button>
+            </div>
+          </div>
+          <p className="sm:col-span-2 text-[11px] text-slate-500">Files are stored once in Contracts &amp; Documents → Project documents. Uploading or linking never changes this item’s status.</p>
+        </div>
+      )}
+    </section>
   );
 }

@@ -655,7 +655,7 @@ export function Td({ children, className = '' }: { children?: React.ReactNode; c
   return <td className={`px-3 py-2 text-xs text-slate-700 align-top ${className}`}>{children}</td>;
 }
 export function Table({ children }: { children: React.ReactNode }) {
-  return <div className="overflow-x-auto -mx-4"><table className="min-w-full divide-y divide-slate-100">{children}</table></div>;
+  return <div className="relative overflow-x-auto -mx-4"><table className="min-w-full divide-y divide-slate-100">{children}</table></div>;
 }
 
 export function Tabs<T extends string>({ value, onChange, tabs }: { value: T; onChange: (v: T) => void; tabs: Array<{ id: T; label: string; count?: number }> }) {

@@ -72,12 +72,15 @@ export const ATTACHMENT_ENTITY_TYPES = [
   'contract',
   'contract_amendment',
   'prerequisite',
+  'project_document',
+  'budget_item',
 ] as const;
 export type AttachmentEntityType = (typeof ATTACHMENT_ENTITY_TYPES)[number];
 
 export const ATTACHMENT_KINDS = [
   'payment_slip', 'consultant_report', 'delivery_note', 'site_photo', 'supporting_document',
   'signed_contract', 'quotation', 'boq', 'amendment',
+  'specification', 'invoice', 'drawing', 'permit', 'approval', 'other',
 ] as const;
 export type AttachmentKind = (typeof ATTACHMENT_KINDS)[number];
 /** File types that can be viewed in a browser tab (View). Other types are always downloaded. */
@@ -92,6 +95,12 @@ export const ATTACHMENT_KIND_LABELS: Record<AttachmentKind, string> = {
   quotation: 'Quotation',
   boq: 'BOQ',
   amendment: 'Amendment',
+  specification: 'Specification',
+  invoice: 'Invoice',
+  drawing: 'Drawing',
+  permit: 'Permit',
+  approval: 'Approval',
+  other: 'Other',
 };
 /** Document types offered for contract files; the other record types keep their original list. */
 export const CONTRACT_DOCUMENT_KINDS = ['signed_contract', 'quotation', 'boq', 'amendment', 'supporting_document'] as const satisfies readonly AttachmentKind[];
@@ -99,14 +108,43 @@ export const GENERAL_ATTACHMENT_KINDS = ['payment_slip', 'consultant_report', 'd
 /** Which document types each record type accepts (checked on the server). */
 /** Document types offered for prerequisite files (permits, surveys, reports, agreements, BOQs). */
 export const PREREQUISITE_DOCUMENT_KINDS = ['supporting_document', 'consultant_report', 'signed_contract', 'boq'] as const satisfies readonly AttachmentKind[];
+/** Document types for files of a project document (register). */
+export const PROJECT_DOCUMENT_FILE_KINDS = ['supporting_document', 'drawing', 'permit', 'approval', 'consultant_report', 'other'] as const satisfies readonly AttachmentKind[];
+/** Document types for files attached to a master budget item. */
+export const BUDGET_ITEM_DOCUMENT_KINDS = ['quotation', 'boq', 'specification', 'invoice', 'supporting_document', 'other'] as const satisfies readonly AttachmentKind[];
 export function attachmentKindsFor(entityType: AttachmentEntityType): readonly AttachmentKind[] {
   if (entityType === 'prerequisite') return PREREQUISITE_DOCUMENT_KINDS;
+  if (entityType === 'project_document') return PROJECT_DOCUMENT_FILE_KINDS;
+  if (entityType === 'budget_item') return BUDGET_ITEM_DOCUMENT_KINDS;
   return entityType === 'contract' || entityType === 'contract_amendment' ? CONTRACT_DOCUMENT_KINDS : GENERAL_ATTACHMENT_KINDS;
 }
 
 // Prerequisites & documents checklist (project-specific records; nothing is created automatically)
 export const PREREQUISITE_STATUSES = ['Not started', 'In progress', 'Awaiting review', 'Completed', 'Not applicable'] as const;
 export type PrerequisiteStatus = (typeof PREREQUISITE_STATUSES)[number];
+
+// Project documents (central register in Contracts & Documents)
+export const PROJECT_DOCUMENT_CATEGORIES = ['permit', 'drawing', 'survey', 'approval', 'report', 'certificate', 'correspondence', 'other'] as const;
+export type ProjectDocumentCategory = (typeof PROJECT_DOCUMENT_CATEGORIES)[number];
+export const PROJECT_DOCUMENT_CATEGORY_LABELS: Record<ProjectDocumentCategory, string> = {
+  permit: 'Permit', drawing: 'Drawing', survey: 'Survey', approval: 'Approval', report: 'Report',
+  certificate: 'Certificate', correspondence: 'Correspondence', other: 'Other',
+};
+/** Where a file in the document register comes from (each keeps its own permissions). */
+export const DOCUMENT_SOURCE_LABELS: Record<AttachmentEntityType, string> = {
+  project_document: 'Project document', prerequisite: 'Prerequisite', contract: 'Contract', contract_amendment: 'Contract amendment',
+  payment_milestone: 'Payment milestone', payment_transaction: 'Payment transfer', consultant_visit: 'Consultant visit', site_visit: 'Site visit',
+  material: 'Material line', work_update: 'Work update', budget_item: 'Budget item',
+};
+
+// Consultant visits: stored statuses are kept; the interface groups them into three visit states.
+export type VisitState = 'Scheduled' | 'Completed' | 'Cancelled';
+export function visitState(status: string): VisitState {
+  return status === 'Completed' ? 'Completed' : status === 'Cancelled' ? 'Cancelled' : 'Scheduled';
+}
+export const ASSIGNMENT_STATUSES = ['active', 'on_hold', 'completed'] as const;
+export const ASSIGNMENT_STATUS_LABELS: Record<(typeof ASSIGNMENT_STATUSES)[number], string> = { active: 'Active', on_hold: 'On hold', completed: 'Completed' };
+export type AssignmentStatus = (typeof ASSIGNMENT_STATUSES)[number];
 
 // Contracts & Documents
 export const CONTRACT_STATUSES = ['Draft', 'Signed', 'Active', 'Completed', 'Terminated'] as const;

@@ -24,6 +24,7 @@ import { attachmentRoutes } from './routes/attachments';
 import { directoryRoutes, projectDirectoryRoute } from './routes/directory';
 import { contractRoutes } from './routes/contracts';
 import { prerequisiteRoutes } from './routes/prerequisites';
+import { documentRoutes } from './routes/documents';
 import { dashboardRoutes, portfolioRoute } from './routes/dashboard';
 import { backupRoutes } from './routes/backup';
 import { OpsState } from './backup/ops';
@@ -98,7 +99,8 @@ export function createApp(pool: pg.Pool, cfg: AppConfig, opts: AppOptions = {}) 
   project.use('/categories', categoryRoutes(pool));
   project.use('/payments', paymentRoutes(pool, cfg.timeZone));
   project.use('/contracts', contractRoutes(pool, cfg.timeZone));
-  project.use('/prerequisites', prerequisiteRoutes(pool, cfg.timeZone));
+  project.use('/prerequisites', prerequisiteRoutes(pool, cfg.timeZone, cfg));
+  project.use('/documents', documentRoutes(pool));
   project.use('/materials', materialRoutes(pool, notifier, cfg.timeZone));
   project.use('/visits', visitRoutes(pool, notifier));
   project.use('/timeline', timelineRoutes(pool, notifier));

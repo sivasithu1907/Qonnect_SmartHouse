@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { AlertTriangle, Archive, Coins, Download, Info, Pencil, Plus, RotateCcw, Table as TableIcon } from 'lucide-react';
+import { AlertTriangle, Archive, Coins, Download, Info, Paperclip, Pencil, Plus, RotateCcw, Table as TableIcon } from 'lucide-react';
 import { patch, post } from '../lib/api';
-import { useApi } from '../lib/hooks';
+import { useApi, useFocusRecord } from '../lib/hooks';
 import { useSession } from '../lib/session';
-import type { BudgetItem, BudgetResponse, Project } from '../lib/types';
+import type { BudgetItem, BudgetResponse, FocusProps, Project } from '../lib/types';
+import { BudgetItemFiles } from '../components/BudgetItemFiles';
 import { formatQAR } from '../lib/format';
 import { sumMoney } from '../../shared/calc';
 import { ManageCategories } from '../components/ManageCategories';
@@ -13,7 +14,7 @@ import { BUDGET_KIND_TITLE, sortBudgetCategories, sortBudgetItems } from '../lib
 const KIND_TITLE = BUDGET_KIND_TITLE;
 const KIND_LABEL: Record<string, string> = { fixed: 'Fixed cost', finishing: 'Finishing', other: 'Other' };
 
-export function Budget({ project, onSettings }: { project: Project; onSettings: () => void }) {
+export function Budget({ project, onSettings, focusId, onFocusHandled }: { project: Project; onSettings: () => void } & FocusProps) {
   const base = `/api/projects/${project.id}/budget`;
   const { data, error, reload } = useApi<BudgetResponse>(base);
   const { can } = useSession();
@@ -23,6 +24,8 @@ export function Budget({ project, onSettings }: { project: Project; onSettings: 
   const [tab, setTab] = useState<'items' | 'categories'>('items');
   const admin = can('budget.write') && !project.archived_at;
   const manageCats = can('categories.manage') && !project.archived_at;
+  const [filesFor, setFilesFor] = useState<string | null>(null);
+  useFocusRecord(focusId, data?.items, (i) => i.id, (i) => setFilesFor(i.id), onFocusHandled);
 
   const cats = useMemo(() => sortBudgetCategories((data?.categories ?? []).filter((c) => showArchived || !c.archived_at)), [data, showArchived]);
   if (error) return <Notice tone="rose">{error}</Notice>;
@@ -52,6 +55,7 @@ export function Budget({ project, onSettings }: { project: Project; onSettings: 
     { name: 'approved_amount', label: 'Approved / Finalized Amount (QAR)', type: 'money', wide: true, placeholder: 'Needs confirmation — leave blank until finalized',
       help: 'Enter only the final approved amount. Leave blank until it is confirmed. Entering an amount never creates or marks a payment.' },
     { name: 'source_label', label: 'Reference / source label', placeholder: 'e.g. contract, quotation or sheet reference' },
+    { name: 'drive_url', label: 'Drive folder link (optional)', type: 'url', placeholder: 'https://drive.google.com/…' },
     { name: 'notes', label: 'Notes', type: 'textarea' },
   ];
 
@@ -114,7 +118,7 @@ export function Budget({ project, onSettings }: { project: Project; onSettings: 
                   <thead><tr>
                     <Th>Category / item</Th>
                     <Th className="text-right">Approved / Finalized Amount (QAR)</Th>
-                    <Th className="text-right">Scheduled</Th><Th className="text-right">Paid</Th><Th>Notes</Th>{admin && <Th />}
+                    <Th className="text-right">Scheduled</Th><Th className="text-right">Paid</Th><Th>Notes</Th><Th><span className="sr-only">Actions</span></Th>
                   </tr></thead>
                   <tbody className="divide-y divide-slate-100">
                     {group.map((c) => (
@@ -128,24 +132,30 @@ export function Budget({ project, onSettings }: { project: Project; onSettings: 
                               {c.notes && <span className="font-normal text-[11px] text-slate-500">{c.notes}</span>}
                             </span>
                           </td>
-                          {admin && <td className="px-3 py-1 whitespace-nowrap text-right">
-                            {!c.archived_at && <Button size="sm" variant="ghost" title="Add item to this category" onClick={() => setEditing({ row: null, categoryId: c.id })}><Plus className="w-3.5 h-3.5" /></Button>}
-                          </td>}
+                          <td className="px-3 py-1 whitespace-nowrap text-right">
+                            {admin && !c.archived_at && <Button size="sm" variant="ghost" title="Add item to this category" onClick={() => setEditing({ row: null, categoryId: c.id })}><Plus className="w-3.5 h-3.5" /></Button>}
+                          </td>
                         </tr>
                         {itemsOf(c.id).length === 0 && <tr><td colSpan={6} className="px-3 py-2 text-[11px] text-slate-400">No items</td></tr>}
                         {itemsOf(c.id).map((i) => (
-                          <tr key={i.id} className={i.archived_at ? 'opacity-60' : ''}>
+                          <tr key={i.id} id={`rec-${i.id}`} className={i.archived_at ? 'opacity-60' : ''}>
                             <Td className="pl-6 text-slate-900">{i.name}{i.quantity !== null && <div className="text-[11px] text-slate-500">{i.quantity} {i.unit}</div>}{i.archived_at && <Badge tone="rose">Archived</Badge>}</Td>
                             <Td className="text-right font-mono whitespace-nowrap">{i.approved_amount === null ? <NeedsConfirmation /> : <span className="text-emerald-700 font-semibold">{formatQAR(i.approved_amount)}</span>}</Td>
                             <Td className="text-right font-mono whitespace-nowrap">{formatQAR(i.scheduled_amount)}</Td>
                             <Td className="text-right font-mono whitespace-nowrap text-sky-700">{formatQAR(i.paid_amount)}</Td>
                             <Td className="max-w-xs"><div className="text-[11px] text-slate-600">{i.notes}</div>{i.source_label && <div className="text-[10px] text-slate-400">Ref: {i.source_label}</div>}</Td>
-                            {admin && <Td className="whitespace-nowrap text-right">
-                              <Button size="sm" variant="ghost" title="Edit" onClick={() => setEditing({ row: i })}><Pencil className="w-3.5 h-3.5" /></Button>
-                              {i.archived_at
-                                ? <Button size="sm" variant="ghost" title="Restore" onClick={() => act(`${base}/items/${i.id}/restore`, 'Item restored')}><RotateCcw className="w-3.5 h-3.5" /></Button>
-                                : <Button size="sm" variant="ghost" title="Archive" onClick={() => act(`${base}/items/${i.id}/archive`, 'Item archived', <>Archive <b>{i.name}</b>? Its history is kept and it can be restored.</>)}><Archive className="w-3.5 h-3.5" /></Button>}
-                            </Td>}
+                            <Td className="whitespace-nowrap text-right">
+                              <Button size="sm" variant="ghost" onClick={() => setFilesFor(i.id)}
+                                title={`Attachments, ${i.attachment_count ?? 0} file${i.attachment_count === 1 ? '' : 's'}`} aria-label={`Attachments for ${i.name}, ${i.attachment_count ?? 0} file${i.attachment_count === 1 ? '' : 's'}`}>
+                                <Paperclip className={`w-3.5 h-3.5 ${i.attachment_count ? 'text-sky-600' : ''}`} />{i.attachment_count ? <span className="text-[11px] font-semibold text-sky-700">{i.attachment_count}</span> : null}
+                              </Button>
+                              {admin && <>
+                                <Button size="sm" variant="ghost" title="Edit" aria-label={`Edit ${i.name}`} onClick={() => setEditing({ row: i })}><Pencil className="w-3.5 h-3.5" /></Button>
+                                {i.archived_at
+                                  ? <Button size="sm" variant="ghost" title="Restore" aria-label={`Restore ${i.name}`} onClick={() => act(`${base}/items/${i.id}/restore`, 'Item restored')}><RotateCcw className="w-3.5 h-3.5" /></Button>
+                                  : <Button size="sm" variant="ghost" title="Archive" aria-label={`Archive ${i.name}`} onClick={() => act(`${base}/items/${i.id}/archive`, 'Item archived', <>Archive <b>{i.name}</b>? Its history is kept and it can be restored.</>)}><Archive className="w-3.5 h-3.5" /></Button>}
+                              </>}
+                            </Td>
                           </tr>
                         ))}
                       </React.Fragment>
@@ -158,7 +168,7 @@ export function Budget({ project, onSettings }: { project: Project; onSettings: 
                       </Td>
                       <Td className="text-right font-mono whitespace-nowrap">{formatQAR(sumMoney(liveItems.map((i) => i.scheduled_amount)))}</Td>
                       <Td className="text-right font-mono whitespace-nowrap">{formatQAR(sumMoney(liveItems.map((i) => i.paid_amount)))}</Td>
-                      <Td />{admin && <Td />}
+                      <Td /><Td />
                     </tr>
                   </tbody>
                 </Table>
@@ -168,6 +178,9 @@ export function Budget({ project, onSettings }: { project: Project; onSettings: 
         </>
       )}
 
+      {filesFor && data.items.find((i) => i.id === filesFor) && (
+        <BudgetItemFiles project={project} item={data.items.find((i) => i.id === filesFor)!} canWrite={admin} onClose={() => setFilesFor(null)} onChanged={reload} />
+      )}
       <Modal open={!!editing} onClose={() => setEditing(null)} wide title={editing?.row ? 'Edit budget item' : 'Add budget item'}>
         {editing && (
           <RecordForm initial={editing.row ?? { category_id: editing.categoryId ?? categoryOptions()[0]?.value }} mode={editing.row ? 'edit' : 'create'} fields={itemFields(editing.row)}

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Archive, ChevronRight, ExternalLink, FileSignature, FileText, FolderOpen, Info, Pencil, Plus, RotateCcw, Settings2 } from 'lucide-react';
 import { patch, post } from '../lib/api';
 import { useApi, useFocusRecord } from '../lib/hooks';
@@ -13,6 +13,7 @@ import { useWideLayout } from '../components/materials/MaterialCategorySection';
 import { Badge, Button, Card, EmptyState, inputCls, LinkButton, Modal, Notice, PageHeader, RecordForm, Spinner, StatusBadge, Table, Td, Th, useUi, type FieldSpec } from '../components/ui';
 import { budgetItemOptions } from '../lib/budgetOrder';
 import { DirectoryLinkBadge, useDirectoryLink } from '../components/directory/DirectoryLink';
+import { ProjectDocuments, type DocumentsResponse } from '../components/documents/ProjectDocuments';
 import { ContractFinanceCell, ContractFinanceInline, ContractFinancePanel } from '../components/contracts/ContractFinance';
 
 export const NO_AUTO_CHANGES_NOTE = 'Saving a contract or entering its value never changes approved budget amounts, creates payment milestones or marks anything paid.';
@@ -37,7 +38,13 @@ export function Contracts({ project, focusId, onFocusHandled }: { project: Proje
   const [detailKey, setDetailKey] = useState(0);
   const { toast } = useUi();
   const dir = useDirectoryLink(project);
-  useFocusRecord(focusId, data?.contracts, (k) => k.id, (k) => setOpenId(k.id), onFocusHandled);
+  const docsAllowed = can('documents.read');
+  const { data: docs, reload: reloadDocs } = useApi<DocumentsResponse>(docsAllowed ? `/api/projects/${project.id}/documents` : null);
+  const [tab, setTab] = useState<'contracts' | 'documents'>(focusId === 'filter:documents' ? 'documents' : 'contracts');
+  // a link to a project document opens the Project documents tab
+  const docFocus = focusId && docs?.documents.some((d) => d.id === focusId) ? focusId : null;
+  useEffect(() => { if (docFocus || focusId === 'filter:documents') setTab('documents'); }, [docFocus, focusId]);
+  useFocusRecord(focusId, data?.contracts, (k) => k.id, (k) => { setTab('contracts'); setOpenId(k.id); }, docFocus ? undefined : onFocusHandled);
 
   const rows = useMemo(() => filterContracts(data?.contracts ?? [], { q, categoryId, status }), [data, q, categoryId, status]);
   if (error) return <Notice tone="rose">{error}</Notice>;
@@ -98,13 +105,24 @@ export function Contracts({ project, focusId, onFocusHandled }: { project: Proje
   return (
     <div className="space-y-6">
       <PageHeader icon={<FileSignature className="w-5 h-5" />} title="Contracts & Documents"
-        subtitle={`${project.name} — ${project.code} · agreements, quotations, BOQs and amendments for this project`}
-        actions={<>
+        subtitle={`${project.name} — ${project.code} · contracts with their values, amendments and payments, and the project's documents`}
+        actions={tab === 'contracts' && <>
           {can('categories.manage') && <Button onClick={() => setCatsOpen(true)}><Settings2 className="w-4 h-4" />Categories</Button>}
           {writable && <Button variant="primary" onClick={() => setEdit({ kind: 'contract', row: null })} disabled={!categories.some((c) => !c.archived_at)}><Plus className="w-4 h-4" />Add contract</Button>}
         </>} />
 
       {project.archived_at && <Notice tone="amber">This project is archived. Contracts and documents are read-only.</Notice>}
+      {docsAllowed && (
+        <div role="tablist" aria-label="Contracts and documents" className="flex gap-1 border-b border-slate-200">
+          {([['contracts', `Contracts (${data.contracts.filter((k) => !k.archived_at).length})`], ['documents', `Project documents${docs ? ` (${docs.documents.filter((d) => !d.archived_at).length})` : ''}`]] as const).map(([id, label]) => (
+            <button key={id} role="tab" type="button" aria-selected={tab === id} onClick={() => setTab(id)}
+              className={`px-4 py-2 text-sm -mb-px border-b-2 ${tab === id ? 'border-sky-600 text-sky-800 font-semibold' : 'border-transparent text-slate-600 hover:text-slate-900'}`}>{label}</button>
+          ))}
+        </div>
+      )}
+      {tab === 'documents' && docsAllowed ? (
+        <ProjectDocuments project={project} data={docs} reload={reloadDocs} focusId={docFocus} onFocusHandled={onFocusHandled} />
+      ) : (<>
       <p className="flex items-start gap-2 text-xs text-slate-600"><Info className="w-4 h-4 text-sky-600 shrink-0" aria-hidden="true" />{NO_AUTO_CHANGES_NOTE}</p>
 
       <Card className="relative overflow-hidden">
@@ -173,6 +191,7 @@ export function Contracts({ project, focusId, onFocusHandled }: { project: Proje
           </ul>
         )}
       </Card>
+      </>)}
 
       {openId && !edit && (
         <ContractDetails key={`${openId}-${detailKey}`} project={project} id={openId} writable={writable}

@@ -72,11 +72,11 @@ function upcomingActivity(pid: string, today: string, materials: any[], tasks: a
       who: t.assigned_user_name || t.responsible || '', status: t.status, href: `#/timeline/${pid}/${t.id}` });
   }
   for (const v of consultant) {
-    out.push({ key: `consultant-${v.id}`, kind: 'consultant_visit', id: v.id, date: v.date, dateLabel: 'Consultant visit / inspection', title: v.purpose, context: '',
+    out.push({ key: `consultant-${v.id}`, kind: 'consultant_visit', id: v.id, date: v.date, dateLabel: v.status === 'Completed' ? 'Consultant visit · completed' : 'Consultant visit / inspection · planned', title: v.purpose, context: '',
       who: v.who || '', status: v.status, href: `#/consultant/${pid}/${v.id}` });
   }
   for (const v of site) {
-    out.push({ key: `site-${v.id}`, kind: 'site_visit', id: v.id, date: v.date, dateLabel: 'Site visit', title: v.purpose, context: '',
+    out.push({ key: `site-${v.id}`, kind: 'site_visit', id: v.id, date: v.date, dateLabel: v.status === 'Completed' ? 'Site visit · completed' : 'Site visit · planned', title: v.purpose, context: '',
       who: v.who || '', status: v.status, href: `#/site/${pid}/${v.id}` });
   }
   const order: Record<string, number> = { material: 0, task: 1, consultant_visit: 2, site_visit: 3 };
@@ -121,23 +121,25 @@ export async function projectDashboard(pool: pg.Pool, project: Record<string, an
         ORDER BY v.visit_at LIMIT 10`, [pid]),
     // visits on a local calendar date (application time zone) inside the next-14-days window
     can(role, 'consultant.read') ? pool.query(
-      `SELECT v.id, (v.planned_at AT TIME ZONE $2)::date AS date, v.purpose, v.status, COALESCE(NULLIF(u.name, ''), v.consultant_name) AS who
+      `SELECT v.id, (COALESCE(CASE WHEN v.status = 'Completed' THEN v.actual_visit_at END, v.planned_at) AT TIME ZONE $2)::date AS date,
+              v.purpose, v.status, COALESCE(NULLIF(u.name, ''), NULLIF(v.consultant_name, ''), concat_ws(' · ', de.display_name, dc.name)) AS who
          FROM consultant_visits v LEFT JOIN users u ON u.id = v.consultant_user_id
-        WHERE v.project_id = $1 AND v.archived_at IS NULL AND v.status IN ('Planned','Rescheduled','In Progress')
-          AND (v.planned_at AT TIME ZONE $2)::date BETWEEN $3 AND $4
+         LEFT JOIN directory_entries de ON de.id = v.directory_entry_id LEFT JOIN directory_contacts dc ON dc.id = v.directory_contact_id
+        WHERE v.project_id = $1 AND v.archived_at IS NULL AND v.status IN ('Planned','Rescheduled','In Progress','Completed')
+          AND (COALESCE(CASE WHEN v.status = 'Completed' THEN v.actual_visit_at END, v.planned_at) AT TIME ZONE $2)::date BETWEEN $3 AND $4
         ORDER BY v.planned_at`, [pid, timeZone, today, upcomingEnd]) : { rows: [] },
     can(role, 'site.read') ? pool.query(
       `SELECT v.id, (v.visit_at AT TIME ZONE $2)::date AS date, v.purpose, v.status, COALESCE(NULLIF(u.name, ''), v.assigned_name) AS who
          FROM site_visits v LEFT JOIN users u ON u.id = v.assigned_user_id
-        WHERE v.project_id = $1 AND v.archived_at IS NULL AND v.status IN ('Planned','Rescheduled','In Progress')
+        WHERE v.project_id = $1 AND v.archived_at IS NULL AND v.status IN ('Planned','Rescheduled','In Progress','Completed')
           AND (v.visit_at AT TIME ZONE $2)::date BETWEEN $3 AND $4
         ORDER BY v.visit_at`, [pid, timeZone, today, upcomingEnd]) : { rows: [] },
     // completed consultant visits (last 30 days) with no consultant report attached
     can(role, 'consultant.read') ? pool.query(
-      `SELECT v.id, (v.planned_at AT TIME ZONE $2)::date AS date, v.purpose, COALESCE(NULLIF(u.name, ''), v.consultant_name) AS who
+      `SELECT v.id, (COALESCE(v.actual_visit_at, v.planned_at) AT TIME ZONE $2)::date AS date, v.purpose, COALESCE(NULLIF(u.name, ''), v.consultant_name) AS who
          FROM consultant_visits v LEFT JOIN users u ON u.id = v.consultant_user_id
-        WHERE v.project_id = $1 AND v.archived_at IS NULL AND v.status = 'Completed' AND v.planned_at IS NOT NULL
-          AND (v.planned_at AT TIME ZONE $2)::date BETWEEN $3 AND $4
+        WHERE v.project_id = $1 AND v.archived_at IS NULL AND v.status = 'Completed' AND COALESCE(v.actual_visit_at, v.planned_at) IS NOT NULL
+          AND (COALESCE(v.actual_visit_at, v.planned_at) AT TIME ZONE $2)::date BETWEEN $3 AND $4
           AND NOT EXISTS (SELECT 1 FROM attachments a WHERE a.project_id = v.project_id AND a.entity_type = 'consultant_visit'
                             AND a.entity_id = v.id AND a.kind = 'consultant_report' AND a.archived_at IS NULL)
         ORDER BY v.planned_at`, [pid, timeZone, addDaysISO(today, -30), today]) : { rows: [] },

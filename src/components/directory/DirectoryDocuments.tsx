@@ -6,6 +6,7 @@ import type { DirectoryDocument } from '../../lib/directory';
 import { DIRECTORY_DOCUMENT_KIND_LABELS, DIRECTORY_DOCUMENT_KINDS } from '../../../shared/directory';
 import { PREVIEWABLE_MIME_TYPES } from '../../../shared/constants';
 import { Button, inputCls, useUi } from '../ui';
+import { FileName } from '../Attachments';
 
 /**
  * Directory documents through the scoped /api/directory routes: shared company documents (admin) and
@@ -62,7 +63,7 @@ export function DirectoryDocuments({ entryId, documents, canUploadShared, writab
                   <div className="flex items-center gap-2 min-w-0">
                     <FileText className="w-4 h-4 text-slate-400 shrink-0" />
                     <div className="min-w-0">
-                      <div className="text-xs font-semibold text-slate-800 truncate">{d.original_name}</div>
+                      <div className="text-xs font-semibold text-slate-800"><FileName name={d.display_name || d.original_name} /></div>
                       <div className="text-[10px] text-slate-500">{DIRECTORY_DOCUMENT_KIND_LABELS[d.kind as keyof typeof DIRECTORY_DOCUMENT_KIND_LABELS] ?? d.kind} · {formatBytes(d.size_bytes)} · {formatDateTime(d.created_at)}{d.uploaded_by_name ? ` by ${d.uploaded_by_name}` : ''}</div>
                     </div>
                   </div>

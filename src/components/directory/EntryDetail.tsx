@@ -9,6 +9,7 @@ import { Badge, Button, EmptyState, Modal, Notice, RecordForm, Spinner, StatusBa
 import { ContactActions } from './ContactActions';
 import { DirectoryDocuments } from './DirectoryDocuments';
 import { EntryForm } from './EntryForm';
+import { ASSIGNMENT_STATUS_LABELS, ASSIGNMENT_STATUSES, type AssignmentStatus } from '../../../shared/constants';
 
 type Tab = 'overview' | 'contacts' | 'assignments' | 'documents' | 'related';
 type SubForm = { kind: 'edit' } | { kind: 'contact'; row: DirectoryContact | null } | { kind: 'assign'; row: DirectoryAssignment | null };
@@ -97,11 +98,11 @@ export function EntryDetail({ id, specializations, onChanged, onOpenEntry }: { i
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-slate-900 flex flex-wrap items-center gap-1.5">{c.name}{c.is_primary && !c.archived_at && <Badge tone="emerald"><Star className="w-3 h-3" />Primary</Badge>}{c.archived_at && <Badge tone="rose">Archived</Badge>}</div>
-                    <div className="text-xs text-slate-600">{[c.position, c.mobile && formatPhone(c.mobile), c.email].filter(Boolean).join(' · ') || '—'}</div>
+                    <div className="text-xs text-slate-600">{[c.position, c.mobile && formatPhone(c.mobile), c.whatsapp && `WhatsApp ${formatPhone(c.whatsapp)}`, c.email].filter(Boolean).join(' · ') || '—'}</div>
                     {c.notes && <p className="text-xs text-slate-500 mt-1 whitespace-pre-wrap">{c.notes}</p>}
                   </div>
                   <div className="flex flex-wrap items-center gap-1">
-                    {!c.archived_at && <ContactActions phone={c.mobile} email={c.email} name={c.name} />}
+                    {!c.archived_at && <ContactActions phone={c.mobile} whatsappNumber={c.whatsapp} email={c.email} name={c.name} />}
                     {perm.canEdit && !c.archived_at && <Button size="sm" variant="ghost" aria-label={`Edit ${c.name}`} onClick={() => setForm({ kind: 'contact', row: c })}><Pencil className="w-3.5 h-3.5" /></Button>}
                     {perm.canEdit && (c.archived_at
                       ? <Button size="sm" variant="ghost" aria-label={`Restore ${c.name}`} onClick={() => act(`/api/directory/contacts/${c.id}/restore`, 'Contact restored')}><RotateCcw className="w-3.5 h-3.5" /></Button>
@@ -123,8 +124,8 @@ export function EntryDetail({ id, specializations, onChanged, onOpenEntry }: { i
                 <li key={a.id} className={`border border-slate-200 rounded-lg p-3 bg-white ${a.archived_at ? 'opacity-60' : ''}`}>
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <div className="text-sm font-semibold text-slate-900 flex flex-wrap items-center gap-1.5"><span className="font-mono text-sky-700">{a.project_code}</span>{a.project_name}{a.archived_at && <Badge tone="rose">Ended / archived</Badge>}</div>
-                      <div className="text-xs text-slate-600">{rolesText(a.roles)}{a.responsible_contact_name ? ` · Responsible: ${a.responsible_contact_name}` : ''}{a.start_date || a.end_date ? ` · ${formatDate(a.start_date)} → ${formatDate(a.end_date)}` : ''}</div>
+                      <div className="text-sm font-semibold text-slate-900 flex flex-wrap items-center gap-1.5"><span className="font-mono text-sky-700">{a.project_code}</span>{a.project_name}{a.archived_at ? <Badge tone="rose">Ended / archived</Badge> : a.status && a.status !== 'active' ? <Badge tone={a.status === 'on_hold' ? 'amber' : 'slate'}>{ASSIGNMENT_STATUS_LABELS[a.status as AssignmentStatus] ?? a.status}</Badge> : <Badge tone="emerald">Active</Badge>}</div>
+                      <div className="text-xs text-slate-600">{rolesText(a.roles)}{a.responsible_contact_name ? ` · Preferred contact: ${a.responsible_contact_name}` : ''}{a.start_date || a.end_date ? ` · ${formatDate(a.start_date)} → ${formatDate(a.end_date)}` : ''}</div>
                       {a.scope && <p className="text-xs text-slate-700 mt-1 whitespace-pre-wrap">{a.scope}</p>}
                     </div>
                     {editable && (
@@ -188,7 +189,8 @@ export function EntryDetail({ id, specializations, onChanged, onOpenEntry }: { i
             fields={[
               { name: 'name', label: 'Name', required: true },
               { name: 'position', label: 'Position / job title' },
-              { name: 'mobile', label: 'Mobile / WhatsApp', type: 'phone' },
+              { name: 'mobile', label: 'Phone / mobile', type: 'phone' },
+              { name: 'whatsapp', label: 'WhatsApp (if different)', type: 'phone', help: 'Optional. Leave blank to use the phone number for WhatsApp.' },
               { name: 'email', label: 'Email' },
               { name: 'is_primary', label: 'Primary contact', type: 'checkbox' },
               { name: 'notes', label: 'Notes', type: 'textarea' },
@@ -200,13 +202,14 @@ export function EntryDetail({ id, specializations, onChanged, onOpenEntry }: { i
             }} />
         )}
         {form?.kind === 'assign' && (
-          <RecordForm mode={form.row ? 'edit' : 'create'} initial={form.row ?? { roles: e.roles.slice(0, 1) }} onCancel={() => setForm(null)}
+          <RecordForm mode={form.row ? 'edit' : 'create'} initial={form.row ?? { roles: e.roles.slice(0, 1), status: 'active' }} onCancel={() => setForm(null)}
             fields={[
               { name: 'project_id', label: 'Project', type: 'select', required: true, hidden: !!form.row,
                 options: perm.writableProjects.filter((p) => !data.assignments.some((a) => a.project_id === p.id && !a.archived_at)).map((p) => ({ value: p.id, label: `${p.code} — ${p.name}` })) },
               { name: 'roles', label: 'Role(s) on this project', type: 'checklist', required: true, options: BUSINESS_ROLES.map((r) => ({ value: r, label: BUSINESS_ROLE_LABELS[r] })) },
-              { name: 'responsible_contact_id', label: 'Responsible contact person', type: 'searchselect', nullable: true, noneLabel: 'Not set', noMatchLabel: 'No matching contacts',
+              { name: 'responsible_contact_id', label: 'Preferred contact person for this project', type: 'searchselect', nullable: true, noneLabel: 'Not set', noMatchLabel: 'No matching contacts',
                 options: activeContacts.map((c) => ({ value: c.id, label: c.name, hint: c.position || undefined })), fallbackLabel: form.row?.responsible_contact_name ?? undefined, hidden: e.entity_type === 'individual' && activeContacts.length === 0 },
+              { name: 'status', label: 'Assignment status', type: 'select', required: true, options: ASSIGNMENT_STATUSES.map((x) => ({ value: x, label: ASSIGNMENT_STATUS_LABELS[x] })) },
               { name: 'start_date', label: 'Start date', type: 'date' },
               { name: 'end_date', label: 'End date', type: 'date' },
               { name: 'scope', label: 'Scope / responsibility on this project', type: 'textarea' },

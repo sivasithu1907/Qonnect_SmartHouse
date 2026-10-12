@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, CalendarClock, Coins, CreditCard, ListChecks, Wallet } from 'lucide-react';
+import { AlertTriangle, CalendarClock, Coins, CreditCard, ListChecks, Scale, Wallet } from 'lucide-react';
 import { formatQAR } from '../../lib/format';
 import type { financeOverview } from '../../lib/dashboard';
 import { InfoPopover } from '../InfoPopover';
@@ -32,9 +32,7 @@ export function FinanceOverview({ projectId, fin, canConfirmBudget, onSettings }
   if (!fin) {
     return <Section id="fin-title" title="Financial overview"><p className="text-sm text-slate-600">Financial figures are not available for your role.</p></Section>;
   }
-  const b = fin.budget ?? 0;
   const it = fin.itemized;
-  const track = fin.confirmed ? Math.max(b, fin.paid) : 0;
   const overPct = it && it.aboveControl > 0 && it.controlBudget ? (it.aboveControl / it.controlBudget) * 100 : null;
   return (
     <Section id="fin-title" title="Financial overview"
@@ -45,7 +43,7 @@ export function FinanceOverview({ projectId, fin, canConfirmBudget, onSettings }
       <div className="space-y-4">
         <div className="space-y-2">
           <GroupLabel>Budget planning</GroupLabel>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className={`grid grid-cols-1 gap-3 ${it ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
             <Metric label="Project budget" icon={<Coins className="w-4 h-4 text-slate-400" />}
               info="The control budget entered and confirmed by an admin in project settings. It is the approved spending limit and never changes automatically."
               value={fin.confirmed ? formatQAR(fin.budget) : fin.budget !== null ? 'Needs confirmation' : 'Not entered'}
@@ -62,6 +60,7 @@ export function FinanceOverview({ projectId, fin, canConfirmBudget, onSettings }
                 value={formatQAR(it.grandTotal)}
                 sub={it.complete ? `${formatQAR(it.finalizedSubtotal)} items + ${formatQAR(it.miscAllowance)} miscellaneous` : <b className="text-amber-800">Incomplete: {it.missingCount} item{it.missingCount === 1 ? '' : 's'} without a finalized amount</b>} />
             ) : <div className="hidden sm:block" />}
+            {it && <VarianceMetric it={it} />}
           </div>
         </div>
 
@@ -83,19 +82,7 @@ export function FinanceOverview({ projectId, fin, canConfirmBudget, onSettings }
         </div>
       </div>
 
-      {fin.confirmed && fin.spentPct !== null && (
-        <div className="mt-4">
-          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-sm">
-            <span className="font-semibold text-slate-800">Paid vs project budget</span>
-            <span className="text-slate-600"><span className="font-mono tabular-nums">{formatQAR(fin.paid)}</span> of <span className="font-mono tabular-nums">{formatQAR(b)}</span> · <b className="font-mono tabular-nums text-slate-900">{fin.spentPct.toFixed(1)}%</b>{fin.over > 0 && <b className="text-rose-700"> · {formatQAR(fin.over)} over</b>}</span>
-          </div>
-          <div className="relative mt-1.5 h-2.5 rounded-full bg-slate-200" role="img" aria-label={`Paid ${formatQAR(fin.paid)} of ${formatQAR(b)} project budget, ${fin.spentPct.toFixed(1)} percent`}>
-            <div className={`absolute inset-y-0 left-0 bg-sky-600 ${fin.over > 0 ? 'rounded-l-full' : 'rounded-full'}`} style={{ width: `${(Math.min(fin.paid, b) / track) * 100}%` }} />
-            {fin.over > 0 && <div className="absolute inset-y-0 bg-rose-500 rounded-r-full" style={{ left: `${(b / track) * 100}%`, width: `${(fin.over / track) * 100}%` }} />}
-            {fin.over > 0 && <div className="absolute -inset-y-1 w-0.5 bg-slate-900 rounded" style={{ left: `calc(${(b / track) * 100}% - 1px)` }} aria-hidden="true" />}
-          </div>
-        </div>
-      )}
+      {fin.confirmed && fin.spentPct !== null && <SpendingBar fin={fin} />}
       {fin.confirmed && fin.spentPct === null && <p className="mt-3 text-sm text-slate-500">The confirmed project budget is {formatQAR(0)}, so paid vs budget isn’t shown as a percentage.</p>}
 
       {it && it.aboveControl > 0 && (
@@ -119,5 +106,59 @@ export function FinanceOverview({ projectId, fin, canConfirmBudget, onSettings }
         </div>
       )}
     </Section>
+  );
+}
+
+/** Itemized total (incl. miscellaneous) compared with the confirmed control budget, shown as above / below / unknown. */
+function VarianceMetric({ it }: { it: NonNullable<Fin['itemized']> }) {
+  const info = 'Total incl. miscellaneous minus the confirmed project budget. Planned cost only — payments and contract values are not part of it. The saved budget never changes when item amounts change.';
+  if (!it.controlBudgetConfirmed || it.difference === null) {
+    return <Metric label="Items vs budget" icon={<Scale className="w-4 h-4 text-slate-400" />} info={info} value="—" tone="muted" amount={false} sub="Needs a confirmed project budget" />;
+  }
+  const d = it.difference;
+  if (d > 0) {
+    return <Metric label="Items vs budget" icon={<Scale className="w-4 h-4 text-rose-500" />} info={info} tone="rose"
+      value={`+${formatQAR(d)}`} sub={<b className="text-rose-700">{it.complete ? 'Above' : 'At least above'} the control budget{it.controlBudget ? ` (${((d / it.controlBudget) * 100).toFixed(1)}%)` : ''}</b>} />;
+  }
+  return <Metric label="Items vs budget" icon={<Scale className="w-4 h-4 text-emerald-600" />} info={info} tone={it.complete ? 'emerald' : 'amber'}
+    value={d === 0 ? formatQAR(0) : `−${formatQAR(-d)}`}
+    sub={d === 0 ? 'Exactly on the control budget' : it.complete ? 'Below the control budget' : <b className="text-amber-800">Below so far — {it.missingCount} item{it.missingCount === 1 ? '' : 's'} not finalized yet</b>} />;
+}
+
+/**
+ * Paid (solid) and scheduled-unpaid (light) against the confirmed budget. The budget mark stays fixed;
+ * anything past it is drawn in rose. Figures are the same ones shown above — nothing is recalculated here.
+ */
+function SpendingBar({ fin }: { fin: Fin }) {
+  const b = fin.budget ?? 0;
+  const committed = fin.paid + fin.unpaid;
+  const scale = Math.max(b, committed, fin.paid) || 1;
+  const pct = (x: number) => `${Math.max(0, (x / scale) * 100)}%`;
+  const paidIn = Math.min(fin.paid, b);
+  const paidOver = Math.max(0, fin.paid - b);
+  const unpaidIn = Math.max(0, Math.min(committed, b) - fin.paid);
+  const unpaidOver = Math.max(0, committed - Math.max(b, fin.paid));
+  const committedOver = committed > b ? committed - b : 0;
+  return (
+    <div className="mt-4" data-testid="spending-bar">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-sm">
+        <span className="font-semibold text-slate-800">Paid vs project budget</span>
+        <span className="text-slate-600"><span className="font-mono tabular-nums">{formatQAR(fin.paid)}</span> of <span className="font-mono tabular-nums">{formatQAR(b)}</span> · <b className="font-mono tabular-nums text-slate-900">{(fin.spentPct ?? 0).toFixed(1)}%</b>{fin.over > 0 && <b className="text-rose-700"> · {formatQAR(fin.over)} over</b>}</span>
+      </div>
+      <div className="relative mt-1.5 h-3 rounded-full bg-slate-200 overflow-hidden" role="img"
+        aria-label={`Paid ${formatQAR(fin.paid)} and scheduled unpaid ${formatQAR(fin.unpaid)} against a project budget of ${formatQAR(b)}`}>
+        <div className="absolute inset-y-0 left-0 bg-sky-600" style={{ width: pct(paidIn) }} />
+        {unpaidIn > 0 && <div className="absolute inset-y-0 bg-amber-300" style={{ left: pct(paidIn), width: pct(unpaidIn) }} />}
+        {paidOver > 0 && <div className="absolute inset-y-0 bg-rose-500" style={{ left: pct(b), width: pct(paidOver) }} />}
+        {unpaidOver > 0 && <div className="absolute inset-y-0 bg-rose-300" style={{ left: pct(Math.max(b, fin.paid)), width: pct(unpaidOver) }} />}
+        {scale > b && <div className="absolute inset-y-0 w-0.5 bg-slate-900" style={{ left: `calc(${pct(b)} - 1px)` }} aria-hidden="true" />}
+      </div>
+      <ul className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600" aria-label="Legend">
+        <li className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-sky-600" aria-hidden="true" />Paid {formatQAR(fin.paid)}</li>
+        <li className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-amber-300" aria-hidden="true" />Scheduled unpaid {formatQAR(fin.unpaid)}</li>
+        {(paidOver > 0 || unpaidOver > 0) && <li className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-rose-500" aria-hidden="true" />Beyond budget</li>}
+        <li className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-slate-200 border border-slate-300" aria-hidden="true" />{committedOver > 0 ? <b className="text-rose-700">Paid + scheduled exceed the budget by {formatQAR(committedOver)}</b> : <>Budget not yet paid or scheduled {formatQAR(b - committed)}</>}</li>
+      </ul>
+    </div>
   );
 }

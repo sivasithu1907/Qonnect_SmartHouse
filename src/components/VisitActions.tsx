@@ -6,9 +6,12 @@ import { formatDate } from '../lib/format';
 import { Button, inputCls, useUi } from './ui';
 
 /** Follow-up actions (description, responsible, due date, open/closed) for a visit. */
-export function VisitActions({ base, type, visitId, actions, canEdit, onChange }: {
+export function VisitActions({ base, type, visitId, actions, canEdit, onChange, members }: {
   base: string; type: 'consultant' | 'site'; visitId: string; actions: VisitAction[]; canEdit: boolean; onChange: () => void;
+  /** project members offered as the responsible person (optional; a free-text name is always possible) */
+  members?: Array<{ id: string; name: string }>;
 }) {
+  const [respUser, setRespUser] = useState('');
   const [desc, setDesc] = useState('');
   const [resp, setResp] = useState('');
   const [due, setDue] = useState('');
@@ -18,8 +21,9 @@ export function VisitActions({ base, type, visitId, actions, canEdit, onChange }
     if (!desc.trim()) return;
     setBusy(true);
     try {
-      await post(`${base}/${type}/${visitId}/actions`, { description: desc, responsible: resp, due_date: due || null });
-      setDesc(''); setResp(''); setDue('');
+      const who = members?.find((m) => m.id === respUser);
+      await post(`${base}/${type}/${visitId}/actions`, { description: desc, responsible: resp || who?.name || '', responsible_user_id: respUser || null, due_date: due || null });
+      setDesc(''); setResp(''); setDue(''); setRespUser('');
       onChange();
     } catch (e) { toast((e as Error).message, 'error'); } finally { setBusy(false); }
   };
@@ -45,9 +49,15 @@ export function VisitActions({ base, type, visitId, actions, canEdit, onChange }
         </ul>
       )}
       {canEdit && (
-        <div className="grid grid-cols-1 sm:grid-cols-[1fr_140px_140px_auto] gap-2">
-          <input className={inputCls} placeholder="Action required" value={desc} onChange={(e) => setDesc(e.target.value)} />
-          <input className={inputCls} placeholder="Responsible" value={resp} onChange={(e) => setResp(e.target.value)} />
+        <div className={`grid grid-cols-1 gap-2 ${members ? 'sm:grid-cols-[1fr_150px_130px_130px_auto]' : 'sm:grid-cols-[1fr_140px_140px_auto]'}`}>
+          <input className={inputCls} placeholder="Action required" aria-label="Action required" value={desc} onChange={(e) => setDesc(e.target.value)} />
+          {members && (
+            <select className={inputCls} value={respUser} onChange={(e) => setRespUser(e.target.value)} aria-label="Responsible user">
+              <option value="">Responsible user…</option>
+              {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          )}
+          <input className={inputCls} placeholder={members ? 'Or name' : 'Responsible'} aria-label="Responsible name" value={resp} onChange={(e) => setResp(e.target.value)} />
           <input className={inputCls} type="date" value={due} onChange={(e) => setDue(e.target.value)} aria-label="Due date" />
           <Button onClick={add} busy={busy}><Plus className="w-3.5 h-3.5" />Add</Button>
         </div>

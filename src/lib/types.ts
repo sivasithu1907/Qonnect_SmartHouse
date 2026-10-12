@@ -22,6 +22,7 @@ export interface BudgetItem {
   source_label: string;
   approved_amount: number | null; approved_at: string | null; notes: string; sort_order: number; archived_at: string | null;
   paid_amount: number; scheduled_amount: number;
+  drive_url?: string; attachment_count?: number;
 }
 export interface MiscAllowance { basis: string; percentage: number; basisAmount: number; allowance: number; itemsCounted: number; itemsMissingValue: number }
 export interface CategorySummary { id: string; name: string; kind: string; approved: number | null; scheduled: number; paid: number; itemCount: number; approvedItemCount: number }
@@ -62,11 +63,16 @@ export interface MaterialItem extends DirectoryLinked {
 }
 export interface ScopeNote { id: string; category: string; category_id: string; owner_supply: string; contractor_scope: string; source_label: string }
 
-export interface VisitAction { id: string; visit_id: string; description: string; responsible: string; due_date: string | null; status: 'Open' | 'Closed' }
+export interface VisitAction { id: string; visit_id: string; description: string; responsible: string; responsible_user_id?: string | null; due_date: string | null; status: 'Open' | 'Closed' }
 export interface ConsultantVisit extends DirectoryLinked {
   id: string; planned_at: string | null; consultant_name: string; consultant_user_id: string | null; consultant_user_name: string | null;
   purpose: string; areas_inspected: string; status: string; observations: string; instructions: string; next_visit_date: string | null;
   related_task_id: string | null; related_material_id: string | null; notes: string; archived_at: string | null; attachment_count: number; actions: VisitAction[];
+  actual_visit_at?: string | null; assigned_user_id?: string | null; assigned_user_name?: string | null; related_milestone_id?: string | null; cancel_reason?: string;
+  visit_state?: 'Scheduled' | 'Completed' | 'Cancelled'; report_status?: 'Report pending' | 'Report uploaded'; report_count?: number; comment_count?: number;
+  related_task_name?: string | null; related_milestone_payee?: string | null; related_milestone_description?: string | null;
+  directory_contact_position?: string | null; directory_contact_mobile?: string | null; directory_contact_whatsapp?: string | null; directory_contact_email?: string | null;
+  directory_entry_phone?: string | null; directory_entry_email?: string | null;
 }
 export interface SiteVisit extends DirectoryLinked {
   id: string; visit_at: string | null; assigned_user_id: string | null; assigned_user_name: string | null; assigned_name: string;

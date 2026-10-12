@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useApi } from '../lib/hooks';
 import { useSession } from '../lib/session';
-import type { Project, Section } from '../lib/types';
+import type { FocusProps, Project, Section } from '../lib/types';
 import { formatDate, formatQAR } from '../lib/format';
 import { Notice, Spinner } from '../components/ui';
 import { NeedsAttention } from '../components/ProjectHealth';
@@ -13,10 +13,10 @@ import { UpcomingPanel } from '../components/dashboard/UpcomingPanel';
 import { ProjectChecklist } from '../components/dashboard/ProjectChecklist';
 
 /**
- * Project dashboard: compact overview → financial overview → phase tracker → next 14 days | needs attention →
- * project setup and prerequisites & documents. All figures come from saved records of the selected project.
+ * Project dashboard: A compact overview → B financial overview → C next 14 days | D needs attention →
+ * E phase tracker → F project setup and construction prerequisites (collapsible, at the bottom). All figures come from saved records of the selected project.
  */
-export function Dashboard({ project, onNavigate, onSettings }: { project: Project; onNavigate: (s: Section) => void; onSettings: () => void }) {
+export function Dashboard({ project, onNavigate, onSettings, focusId, onFocusHandled }: { project: Project; onNavigate: (s: Section) => void; onSettings: () => void } & FocusProps) {
   const { can } = useSession();
   const { data: d, error } = useApi<DashboardData & Record<string, any>>(`/api/projects/${project.id}/dashboard`);
   const [phaseId, setPhaseId] = useState<string | null>(null);
@@ -47,13 +47,13 @@ export function Dashboard({ project, onNavigate, onSettings }: { project: Projec
         onOpenPhase={setPhaseId} onSettings={onSettings} canSettings={can('links.edit') || can('projects.manage')} canTimeline={can('timeline.read')}
         budgetUnconfirmed={!view.fin || view.fin.confirmed ? null : view.fin.budget === null ? 'missing' : 'unconfirmed'} canConfirmBudget={can('projects.manage') && !project.archived_at} />
       <FinanceOverview projectId={project.id} fin={view.fin} canConfirmBudget={can('projects.manage') && !project.archived_at} onSettings={onSettings} />
-      {can('timeline.read') && <PhaseTracker phases={view.phases} onOpenPhase={setPhaseId} />}
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)] gap-4 items-start">
         <UpcomingPanel projectId={project.id} items={d.upcoming ?? []} today={today} days={days} can={can} />
         <NeedsAttention items={view.attention} />
       </div>
+      {can('timeline.read') && <PhaseTracker phases={view.phases} onOpenPhase={setPhaseId} />}
       <ProjectChecklist project={project} setup={view.setup} today={today} onSettings={onSettings} onNavigate={onNavigate}
-        phases={view.phases.map((p) => ({ id: p.id, seq: p.seq, name: p.name }))} />
+        phases={view.phases.map((p) => ({ id: p.id, seq: p.seq, name: p.name }))} focusId={focusId} onFocusHandled={onFocusHandled} />
       <PhaseDetails projectId={project.id} phase={phase} allTasks={view.tasks} onClose={() => setPhaseId(null)} />
     </div>
   );

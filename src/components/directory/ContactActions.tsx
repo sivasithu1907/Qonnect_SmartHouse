@@ -3,12 +3,13 @@ import { Mail, MessageCircle, Phone } from 'lucide-react';
 import { formatPhone, telUrl, whatsappUrl } from '../../../shared/directory';
 
 /** Call / email / WhatsApp links where details exist. WhatsApp only opens a chat; nothing is sent. */
-export function ContactActions({ phone, email, whatsapp = true, compact = false, name }: { phone?: string | null; email?: string | null; whatsapp?: boolean; compact?: boolean; name?: string }) {
+export function ContactActions({ phone, email, whatsapp = true, whatsappNumber, compact = false, name }: { phone?: string | null; email?: string | null; whatsapp?: boolean; whatsappNumber?: string | null; compact?: boolean; name?: string }) {
   const tel = telUrl(phone);
-  const wa = whatsapp ? whatsappUrl(phone) : '';
+  // a separate WhatsApp number wins; otherwise the mobile number is used
+  const wa = whatsapp ? whatsappUrl(whatsappNumber || phone) : '';
   const cls = `inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white text-sky-700 hover:bg-sky-50 no-underline ${compact ? 'min-h-8 px-2 text-[11px]' : 'min-h-9 px-2.5 text-xs'} font-semibold`;
   const who = name ? ` ${name}` : '';
-  if (!tel && !email) return null;
+  if (!tel && !email && !wa) return null;
   return (
     <span className="inline-flex flex-wrap items-center gap-1.5">
       {tel && <a href={tel} className={cls} aria-label={`Call${who} ${formatPhone(phone)}`} title={`Call ${formatPhone(phone)}`}><Phone className="w-3.5 h-3.5" />{!compact && 'Call'}</a>}

@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CalendarDays, ChevronLeft, ChevronRight, Settings } from 'lucide-react';
+import React, { useState } from 'react';
+import { AlertTriangle, CalendarDays, ChevronDown, ChevronUp, Settings } from 'lucide-react';
 import type { Project } from '../../lib/types';
 import { formatDate } from '../../lib/format';
 import { pctLabel, phaseDisplayName, type DashTask, type Milestone, type PhaseSummary, taskCompletion } from '../../lib/dashboard';
@@ -123,67 +123,62 @@ export function ProjectOverview({ project, tasks, phases, milestone, upcomingDay
   );
 }
 
-/** Horizontal phase tracker; scrolls inside itself, never the page. */
-export function PhaseTracker({ phases, onOpenPhase }: { phases: PhaseSummary[]; onOpenPhase: (id: string) => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [edge, setEdge] = useState({ start: true, end: true });
-  const update = useCallback(() => {
-    const el = ref.current;
-    if (!el) return;
-    setEdge({ start: el.scrollLeft <= 2, end: el.scrollLeft + el.clientWidth >= el.scrollWidth - 2 });
-  }, []);
-  useEffect(() => {
-    const el = ref.current;
-    if (el) {
-      // bring the current (first in-progress) phase into view; otherwise start at the first phase
-      const current = phases.find((p) => p.status === 'In progress');
-      const card = current ? el.querySelector<HTMLElement>(`[data-phase="${current.id}"]`) : null;
-      el.scrollLeft = card ? Math.max(0, card.offsetLeft - el.offsetLeft - 8) : 0;
-    }
-    update();
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
-  }, [phases, update]);
-  const move = (dir: number) => ref.current?.scrollBy({ left: dir * Math.max(280, ref.current.clientWidth * 0.8), behavior: 'smooth' });
-  const navBtn = 'w-9 h-9 grid place-items-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40';
+/**
+ * Phase tracker as a wrapping grid of compact cards (no sideways scrolling). Long timelines show the
+ * phases around the current one first, with "Show all" for the rest.
+ */
+export function PhaseTracker({ phases, onOpenPhase, initialLimit = 8 }: { phases: PhaseSummary[]; onOpenPhase: (id: string) => void; initialLimit?: number }) {
+  const [all, setAll] = useState(false);
+  const firstOpen = phases.findIndex((p) => p.status !== 'Completed');
+  // start one completed phase before the first open one, so the current work is in view
+  const from = phases.length <= initialLimit || firstOpen < 0 ? 0 : Math.max(0, Math.min(firstOpen - 1, phases.length - initialLimit));
+  const shown = all ? phases : phases.slice(from, from + initialLimit);
+  const hidden = phases.length - shown.length;
+  const done = phases.filter((p) => p.status === 'Completed').length;
+  const active = phases.filter((p) => p.status === 'In progress').length;
   return (
-    <Section id="ph-title" title="Construction phases" meta={phases.length ? `${phases.length} phases` : undefined}
-      actions={phases.length > 0 && (
-        <>
-          <button type="button" aria-label="Previous phases" disabled={edge.start} onClick={() => move(-1)} className={navBtn}><ChevronLeft className="w-4 h-4" /></button>
-          <button type="button" aria-label="Next phases" disabled={edge.end} onClick={() => move(1)} className={navBtn}><ChevronRight className="w-4 h-4" /></button>
-        </>
+    <Section id="ph-title" title="Construction phases" meta={phases.length ? `${done} of ${phases.length} completed${active ? ` · ${active} in progress` : ''}` : undefined}
+      actions={phases.length > initialLimit && (
+        <button type="button" onClick={() => setAll(!all)} aria-expanded={all} className={linkBtn}>
+          {all ? <><ChevronUp className="w-4 h-4" />Show fewer</> : <><ChevronDown className="w-4 h-4" />Show all {phases.length} phases</>}
+        </button>
       )}>
       {phases.length === 0 ? (
         <p className="text-sm text-slate-500">No phases yet. They appear when the timeline has phases and tasks.</p>
       ) : (
-        <div ref={ref} onScroll={update} data-testid="phase-scroller" className="flex gap-3 overflow-x-auto pb-2 snap-x" role="list" aria-label="Phases (scroll sideways)">
-          {phases.map((p) => {
-            const title = phaseDisplayName(p.name);
-            return (
-              <div key={p.id} role="listitem" data-phase={p.id}
-                className={`snap-start shrink-0 w-64 rounded-lg border p-4 flex flex-col gap-2.5 bg-white ${p.status === 'In progress' ? 'border-sky-400 ring-1 ring-sky-400' : 'border-slate-200'}`}>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-semibold text-slate-500">Phase {p.seq}</span>
-                  <Badge tone={phaseTone(p.status)}>{p.status}</Badge>
-                </div>
-                <p className="text-sm font-semibold text-slate-900 leading-snug" title={p.name}>{title}</p>
-                {p.total > 0 && (
-                  <div>
-                    <div className="flex justify-between text-xs text-slate-600">
-                      <span>{p.done}/{p.total} tasks{p.blocked > 0 && <span className="font-semibold text-rose-700"> · {p.blocked} blocked</span>}</span>
-                      <span className="font-mono">{pctLabel(p.done, p.total)}</span>
-                    </div>
-                    <div className="mt-1 h-1.5 rounded-full bg-slate-200 overflow-hidden" aria-hidden="true"><div className={`h-full rounded-full ${p.status === 'Completed' ? 'bg-emerald-500' : 'bg-sky-600'}`} style={{ width: `${(p.done / p.total) * 100}%` }} /></div>
-                  </div>
-                )}
-                {(p.start || p.end) && <p className="text-xs text-slate-500">{formatDate(p.start)} → {formatDate(p.end)}</p>}
-                <button type="button" onClick={() => onOpenPhase(p.id)} aria-label={`Details: phase ${p.seq}, ${title}`}
-                  className="mt-auto self-start min-h-8 text-sm font-semibold text-sky-700 hover:text-sky-900">Details →</button>
-              </div>
-            );
-          })}
-        </div>
+        <>
+          <ul data-testid="phase-grid" className="grid grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-2" aria-label="Construction phases">
+            {shown.map((p) => {
+              const title = phaseDisplayName(p.name);
+              return (
+                <li key={p.id} data-phase={p.id}>
+                  <button type="button" onClick={() => onOpenPhase(p.id)} aria-label={`Details: phase ${p.seq}, ${title}, ${p.status}`} title={p.name}
+                    className={`w-full h-full text-left rounded-lg border px-3 py-2.5 flex flex-col gap-1.5 bg-white hover:bg-slate-50 transition-colors ${p.status === 'In progress' ? 'border-sky-400 ring-1 ring-sky-400' : 'border-slate-200'}`}>
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-semibold text-slate-500">Phase {p.seq}</span>
+                      <Badge tone={phaseTone(p.status)}>{p.status}</Badge>
+                    </span>
+                    <span className="text-sm font-semibold text-slate-900 leading-snug line-clamp-2">{title}</span>
+                    {p.total > 0 ? (
+                      <span className="block">
+                        <span className="flex justify-between text-xs text-slate-600">
+                          <span>{p.done}/{p.total} tasks{p.blocked > 0 && <span className="font-semibold text-rose-700"> · {p.blocked} blocked</span>}</span>
+                          <span className="font-mono">{pctLabel(p.done, p.total)}</span>
+                        </span>
+                        <span className="mt-1 block h-1.5 rounded-full bg-slate-200 overflow-hidden" aria-hidden="true"><span className={`block h-full rounded-full ${p.status === 'Completed' ? 'bg-emerald-500' : 'bg-sky-600'}`} style={{ width: `${(p.done / p.total) * 100}%` }} /></span>
+                      </span>
+                    ) : <span className="text-xs text-slate-500">No tasks</span>}
+                    <span className="flex items-center justify-between gap-2 text-xs text-slate-500">
+                      <span>{p.start || p.end ? `${formatDate(p.start)} → ${formatDate(p.end)}` : ''}</span>
+                      <span className="font-semibold text-sky-700">Details →</span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          {!all && hidden > 0 && <p className="mt-2 text-xs text-slate-500">{hidden} more phase{hidden === 1 ? '' : 's'} not shown.</p>}
+        </>
       )}
     </Section>
   );

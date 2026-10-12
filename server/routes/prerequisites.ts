@@ -19,6 +19,11 @@ import { assertProjectMember, assertSameProject, getOwned, insertRow, patchOwned
 import { can } from '../permissions';
 import { PREREQUISITE_STATUSES } from '../../shared/constants';
 import { todayISO } from '../../shared/calc';
+import type { AppConfig } from '../config';
+import { singleFile, storeUploadedFile, insertAttachment } from './attachments';
+import { documentFields } from './documents';
+import { PROJECT_DOCUMENT_FILE_KINDS } from '../../shared/constants';
+import type { Role } from '../../shared/constants';
 
 const uuidOrNull = z.preprocess((v) => (v === '' ? null : v), z.string().uuid().nullable());
 
@@ -37,9 +42,15 @@ const statusChange = z.object({
   completed_on: zDate.optional(),
 });
 
-export async function loadPrerequisites(db: pg.Pool | pg.PoolClient, pid: string, includeArchived: boolean, showContracts: boolean) {
+export async function loadPrerequisites(db: pg.Pool | pg.PoolClient, pid: string, includeArchived: boolean, showContracts: boolean, role?: Role) {
+  const showDocuments = role ? can(role, 'documents.read') : false;
   const { rows } = await db.query(
     `SELECT q.*, ph.seq AS phase_seq, ph.name AS phase_name,
+            COALESCE((SELECT json_agg(json_build_object('id', d.id, 'title', d.title, 'category', d.category, 'archived_at', d.archived_at,
+                        'file_count', (SELECT count(*)::int FROM attachments a WHERE a.project_id = d.project_id AND a.entity_type = 'project_document' AND a.entity_id = d.id AND a.archived_at IS NULL))
+                        ORDER BY pd.linked_at)
+                        FROM prerequisite_documents pd JOIN project_documents d ON d.id = pd.document_id
+                       WHERE pd.prerequisite_id = q.id), '[]') AS documents,
             COALESCE(NULLIF(ru.name, ''), q.responsible_name) AS responsible_display,
             du.name AS decided_by_name,
             k.title AS contract_title, k.company_name AS contract_company, k.status AS contract_status, k.archived_at AS contract_archived_at,
@@ -54,9 +65,11 @@ export async function loadPrerequisites(db: pg.Pool | pg.PoolClient, pid: string
       ORDER BY q.archived_at NULLS FIRST, q.sort_order, q.created_at`,
     [pid, includeArchived],
   );
-  if (showContracts) return rows;
+  // linked documents follow the documents permission: others only see how many are linked
+  const docs = showDocuments ? rows : rows.map(({ documents, ...r }) => ({ ...r, documents: [], document_link_count: (documents as unknown[]).length }));
+  if (showContracts) return docs;
   // the linked contract's details follow the contracts permission
-  return rows.map(({ contract_title: _t, contract_company: _c, contract_status: _s, contract_archived_at: _a, contract_file_count: _f, ...r }) => ({ ...r, contract_linked: !!r.contract_id }));
+  return docs.map(({ contract_title: _t, contract_company: _c, contract_status: _s, contract_archived_at: _a, contract_file_count: _f, ...r }) => ({ ...r, contract_linked: !!r.contract_id }));
 }
 
 async function assertLinks(c: pg.PoolClient, pid: string, body: Record<string, unknown>) {
@@ -65,12 +78,12 @@ async function assertLinks(c: pg.PoolClient, pid: string, body: Record<string, u
   await assertProjectMember(c, pid, body.responsible_user_id as string | null | undefined);
 }
 
-export function prerequisiteRoutes(pool: pg.Pool, timeZone: string) {
+export function prerequisiteRoutes(pool: pg.Pool, timeZone: string, cfg: AppConfig) {
   const r = Router({ mergeParams: true });
 
   r.get('/', async (req, res) => {
     assertCap(req, 'prerequisites.read');
-    res.json(await loadPrerequisites(pool, req.project!.id, req.query.includeArchived === '1', can(req.user!.role, 'contracts.read')));
+    res.json(await loadPrerequisites(pool, req.project!.id, req.query.includeArchived === '1', can(req.user!.role, 'contracts.read'), req.user!.role));
   });
 
   r.post('/', async (req, res) => {
@@ -103,7 +116,7 @@ export function prerequisiteRoutes(pool: pg.Pool, timeZone: string) {
       const byId = new Map(rows.map((x) => [x.id, x.title]));
       await audit(c, req, { projectId: pid, action: 'reorder', entityType: 'prerequisite', summary: 'Reordered prerequisites', before: rows.map((x) => x.title), after: ids.map((x) => byId.get(x)) });
     });
-    res.json(await loadPrerequisites(pool, pid, false, can(req.user!.role, 'contracts.read')));
+    res.json(await loadPrerequisites(pool, pid, false, can(req.user!.role, 'contracts.read'), req.user!.role));
   });
 
   r.patch('/:id', async (req, res) => {
@@ -144,6 +157,76 @@ export function prerequisiteRoutes(pool: pg.Pool, timeZone: string) {
       return after;
     });
     res.json(out);
+  });
+
+  // ---- evidence: documents from the central register (never a copy of a file)
+  const reload = async (pid: string, id: string, role: Role) =>
+    (await loadPrerequisites(pool, pid, true, can(role, 'contracts.read'), role)).find((x) => x.id === id);
+
+  r.post('/:id/documents', async (req, res) => {
+    assertCap(req, 'prerequisites.write');
+    assertCap(req, 'documents.read');
+    const id = uuidParam(req, 'id');
+    const pid = req.project!.id;
+    const { document_id } = parseBody(z.object({ document_id: z.string().uuid() }), req);
+    await withTx(pool, async (c) => {
+      const q = await getOwned<Record<string, unknown>>(c, 'project_prerequisites', pid, id, { forUpdate: true });
+      if (q.archived_at) throw badRequest('This prerequisite is archived. Restore it before editing.');
+      const d = await getOwned<Record<string, unknown>>(c, 'project_documents', pid, document_id);
+      if (d.archived_at) throw badRequest('That document is archived');
+      const ins = await c.query(
+        `INSERT INTO prerequisite_documents (prerequisite_id, document_id, project_id, linked_by) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
+        [id, document_id, pid, req.user!.id]);
+      if (ins.rowCount) await audit(c, req, { projectId: pid, action: 'link', entityType: 'prerequisite', entityId: id, summary: `Linked document "${d.title}" to prerequisite "${q.title}" (status unchanged: ${q.status})` });
+    });
+    res.json(await reload(pid, id, req.user!.role));
+  });
+
+  r.post('/:id/documents/:docId/unlink', async (req, res) => {
+    assertCap(req, 'prerequisites.write');
+    const id = uuidParam(req, 'id');
+    const docId = uuidParam(req, 'docId');
+    const pid = req.project!.id;
+    await withTx(pool, async (c) => {
+      const q = await getOwned<Record<string, unknown>>(c, 'project_prerequisites', pid, id, { forUpdate: true });
+      const del = await c.query('DELETE FROM prerequisite_documents WHERE prerequisite_id = $1 AND document_id = $2 AND project_id = $3 RETURNING document_id', [id, docId, pid]);
+      if (del.rowCount) {
+        const d = await c.query('SELECT title FROM project_documents WHERE id = $1', [docId]);
+        await audit(c, req, { projectId: pid, action: 'unlink', entityType: 'prerequisite', entityId: id, summary: `Removed the link to document "${d.rows[0]?.title}" from prerequisite "${q.title}" (the document and its files are kept)` });
+      }
+    });
+    res.json(await reload(pid, id, req.user!.role));
+  });
+
+  // Upload against a prerequisite: creates a project document (it appears in Contracts & Documents), stores the
+  // file once on that document, and links it. The prerequisite's status is never changed.
+  r.post('/:id/upload', singleFile(cfg), async (req, res) => {
+    assertCap(req, 'prerequisites.write');
+    assertCap(req, 'documents.write');
+    const id = uuidParam(req, 'id');
+    const pid = req.project!.id;
+    const body = parseBody(documentFields.partial().extend({ kind: z.enum(PROJECT_DOCUMENT_FILE_KINDS).default('supporting_document') }), req);
+    const q0 = await getOwned<Record<string, unknown>>(pool, 'project_prerequisites', pid, id);
+    if (q0.archived_at) throw badRequest('This prerequisite is archived. Restore it before editing.');
+    const stored = await storeUploadedFile(cfg, pid, req.file);
+    try {
+      await withTx(pool, async (c) => {
+        const q = await getOwned<Record<string, unknown>>(c, 'project_prerequisites', pid, id, { forUpdate: true });
+        const title = body.title?.trim() || stored.originalName.replace(/\.[A-Za-z0-9]{1,8}$/, '') || stored.originalName;
+        const d = await insertRow(c, 'project_documents', {
+          project_id: pid, title, category: body.category ?? 'other', reference: body.reference ?? '', document_date: body.document_date ?? null,
+          drive_url: body.drive_url ?? '', notes: body.notes ?? '', created_by: req.user!.id,
+        });
+        const a = await insertAttachment(c, stored, { projectId: pid, entityType: 'project_document', entityId: d.id as string, kind: body.kind, userId: req.user!.id });
+        await c.query('INSERT INTO prerequisite_documents (prerequisite_id, document_id, project_id, linked_by) VALUES ($1,$2,$3,$4)', [id, d.id, pid, req.user!.id]);
+        await audit(c, req, { projectId: pid, action: 'upload', entityType: 'project_document', entityId: d.id as string,
+          summary: `Uploaded ${stored.originalName} as project document "${title}" for prerequisite "${q.title}" (status unchanged: ${q.status})`, after: { document: d, file: a } });
+      });
+    } catch (e) {
+      await stored.discard();
+      throw e;
+    }
+    res.status(201).json(await reload(pid, id, req.user!.role));
   });
 
   for (const action of ['archive', 'restore'] as const) {

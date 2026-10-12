@@ -133,6 +133,9 @@ export interface Prerequisite {
   completed_on: string | null; decided_by_name: string | null; decided_at: string | null; contract_id: string | null;
   contract_title?: string | null; contract_company?: string | null; contract_status?: string | null; contract_archived_at?: string | null;
   contract_file_count?: number; contract_linked?: boolean; document_url: string; notes: string; attachment_count: number;
+  /** register documents linked as evidence (empty when the role cannot read documents; then only the count is given) */
+  documents: Array<{ id: string; title: string; category: string; archived_at: string | null; file_count: number }>;
+  document_link_count?: number;
   sort_order: number; archived_at: string | null;
 }
 

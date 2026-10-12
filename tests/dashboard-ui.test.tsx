@@ -117,14 +117,14 @@ describe('phase tracker', () => {
     ], tasks);
     const h = renderToStaticMarkup(<PhaseTracker phases={phases} onOpenPhase={noop} />);
     const t = text(h);
-    expect(h).toContain('overflow-x-auto');
+    expect(h).not.toContain('overflow-x-auto'); // wrapping grid, no sideways scroll
+    expect(h).toContain('data-testid="phase-grid"');
     expect(t).toContain('Phase 1');
     expect(t).toContain('Structure & envelope');
     expect(t).toContain('A custom phase name that is quite…');
     expect(t).toContain('1/2 tasks');
     expect((t.match(/Not scheduled/g) ?? []).length).toBeLessThanOrEqual(1); // status badge only, no repeated date line
     expect(t).toContain('01/11/2026 → 30/11/2026');
-    expect(h).toContain('aria-label="Previous phases"');
     const d = text(renderToStaticMarkup(<PhaseDetails projectId="p1" phase={phases[0]} allTasks={tasks} onClose={noop} />));
     expect(d).toContain(LONG1);
   });
@@ -184,9 +184,9 @@ describe('needs attention', () => {
 });
 
 describe('checklist', () => {
-  const render = (role: 'admin' | 'contractor', setup: SetupItem[] = []) => text(renderToStaticMarkup(
+  const render = (role: 'admin' | 'contractor', setup: SetupItem[] = [], defaultOpen = true) => text(renderToStaticMarkup(
     <SessionContext.Provider value={session(role)}><UiProvider>
-      <ProjectChecklist project={project} setup={setup} phases={[]} today="2026-10-15" onSettings={noop} onNavigate={noop} />
+      <ProjectChecklist project={project} setup={setup} phases={[]} today="2026-10-15" onSettings={noop} onNavigate={noop} defaultOpen={defaultOpen} />
     </UiProvider></SessionContext.Provider>,
   ));
   const step = (key: SetupItem['key'], done: boolean, count: SetupItem['count']): SetupItem => ({ key, label: key, done, progress: null, count, detail: 'detail', action: { kind: 'settings' }, actionLabel: 'Open settings' });
@@ -198,11 +198,17 @@ describe('checklist', () => {
     expect(t).toContain('4/40 entered');
     expect(t).toContain('0/47 tasks scheduled');
     expect(t).toContain('does not indicate construction readiness');
-    expect(t).toContain('Prerequisites & documents');
+    expect(t).toContain('Construction prerequisites');
     expect(t).not.toMatch(/\d+% /); // no combined percentage
+    // collapsed by default: only the headers with their counts
+    const closed = render('admin', [step('responsibilities', false, { done: 22, total: 40, unit: 'assigned' }), step('control_budget', true, null)], false);
+    expect(closed).toContain('1 of 2 steps complete');
+    expect(closed).toContain('Construction prerequisites');
+    expect(closed).not.toContain('22/40 assigned');
   });
   it('roles without access see a note; the preference key is per user, project and section', () => {
     expect(render('contractor')).toContain('Prerequisites are visible to admins, project managers and viewers');
+    expect(render('contractor', [], false)).toContain('Not available for your role');
     expect(checklistPrefKey('u1', 'p1', 'setup')).toBe('qonnect.dashboard.u1.p1.setup.open');
     expect(checklistPrefKey('u1', 'p2', 'setup')).not.toBe(checklistPrefKey('u1', 'p1', 'setup'));
   });
@@ -289,5 +295,33 @@ describe('budget warning edge cases', () => {
     expect(zero).not.toMatch(/above budget \(/);
     const ok = text(renderToStaticMarkup(<FinanceOverview projectId="p1" fin={fo(itemizedBudget({ finalizedSubtotal: 900000, missingCount: 0, miscAllowance: 0, controlBudget: 1000000, controlBudgetConfirmed: true }))} canConfirmBudget onSettings={noop} />));
     expect(ok).not.toContain('Itemized costs are');
+  });
+});
+
+describe('finance: items vs budget and spending bar (display only)', () => {
+  const it6 = (over: Record<string, unknown> = {}) => itemizedBudget({ finalizedSubtotal: 1201086.5, missingCount: 0, miscAllowance: 62858.65, controlBudget: 1000000, controlBudgetConfirmed: true, ...over });
+  it('shows the amount above or below the control budget explicitly, and honest states when unknown', () => {
+    const above = text(renderToStaticMarkup(<FinanceOverview projectId="p1" canConfirmBudget onSettings={noop}
+      fin={financeOverview({ controlBudget: 1000000, controlBudgetConfirmed: true, paid: 0, pending: 0, overdue: 0, overdueCount: 0, itemized: it6() })} />));
+    expect(above).toContain('Items vs budget');
+    expect(above).toContain('+QAR 263,945.15');
+    expect(above).toContain('Above the control budget');
+    const below = text(renderToStaticMarkup(<FinanceOverview projectId="p1" canConfirmBudget onSettings={noop}
+      fin={financeOverview({ controlBudget: 2000000, controlBudgetConfirmed: true, paid: 0, pending: 0, overdue: 0, overdueCount: 0, itemized: it6({ controlBudget: 2000000, missingCount: 2 }) })} />));
+    expect(below).toContain('−QAR 736,054.85');
+    expect(below).toContain('Below so far — 2 items not finalized yet');
+    const unconf = text(renderToStaticMarkup(<FinanceOverview projectId="p1" canConfirmBudget onSettings={noop}
+      fin={financeOverview({ controlBudget: 2000000, controlBudgetConfirmed: false, paid: 0, pending: 0, overdue: 0, overdueCount: 0, itemized: it6({ controlBudgetConfirmed: false }) })} />));
+    expect(unconf).toContain('Needs a confirmed project budget');
+  });
+  it('bar legend separates paid and scheduled unpaid and flags commitments beyond the budget', () => {
+    const h = renderToStaticMarkup(<FinanceOverview projectId="p1" fin={fin()} canConfirmBudget onSettings={noop} />);
+    const t = text(h);
+    expect(h).toContain('data-testid="spending-bar"');
+    expect(t).toContain('Paid QAR 765,000.00');
+    expect(t).toContain('Scheduled unpaid QAR 143,500.00');
+    expect(t).toContain('Budget not yet paid or scheduled QAR 891,500.00');
+    const over = text(renderToStaticMarkup(<FinanceOverview projectId="p1" fin={fin({ controlBudget: 800000 })} canConfirmBudget onSettings={noop} />));
+    expect(over).toContain('Paid + scheduled exceed the budget by QAR 108,500.00');
   });
 });
