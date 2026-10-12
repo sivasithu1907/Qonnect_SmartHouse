@@ -154,7 +154,7 @@ describe('project documents and prerequisites', () => {
 });
 
 describe('budget item attachments', () => {
-  it('fixed and finishing items accept files; amounts and payments never change; related documents link to originals', async () => {
+  it('fixed and finishing items accept files; amounts and payments never change; only its own files are listed', async () => {
     const b0 = (await admin.get(`${P1}/budget`)).body;
     const cats = new Map(b0.categories.map((c: { id: string; kind: string }) => [c.id, c.kind]));
     const fixed = b0.items.find((i: { category_id: string }) => cats.get(i.category_id) === 'fixed');
@@ -175,17 +175,8 @@ describe('budget item attachments', () => {
     expect((await contractor.get(`${P1}/attachments?entity_type=budget_item&entity_id=${fixed.id}`)).status).toBe(403);
     // drive link on the item
     expect((await admin.patch(`${P1}/budget/items/${fixed.id}`, { drive_url: 'https://drive.google.com/drive/folders/abc' })).body.drive_url).toBe('https://drive.google.com/drive/folders/abc');
-    // related: a contract and a payment linked to the item, with their files (not copied)
-    const cat = (await pm.get(`${P1}/categories`)).body.contract[0].id;
-    const k = (await pm.post(`${P1}/contracts`, { title: 'Main', category_id: cat, company_name: 'X', budget_item_id: fixed.id })).body;
-    await pm.upload(`${P1}/attachments`, { entity_type: 'contract', entity_id: k.id, kind: 'signed_contract' }, { buf: PDF, name: 'signed.pdf' });
-    const m = (await pm.post(`${P1}/payments/milestones`, { payee_type: 'contractor', payee_name: 'X', description: 'Adv', scheduled_amount: 10, budget_item_id: fixed.id })).body;
-    const t = (await pm.post(`${P1}/payments/milestones/${m.id}/transactions`, { amount: 10, paid_date: '2026-09-01', method: 'bank_transfer', reference: 'REL-1' })).body;
-    await pm.upload(`${P1}/attachments`, { entity_type: 'payment_transaction', entity_id: t.id, kind: 'payment_slip' }, { buf: PNG, name: 'slip.png' });
-    const rel = await viewer.get(`${P1}/budget/items/${fixed.id}/related`);
-    expect(rel.body.contracts.map((x: { id: string }) => x.id)).toEqual([k.id]);
-    expect(rel.body.files.map((f: { source: string; href: string }) => [f.source, f.href]).sort()).toEqual([
-      ['contract', `#/contracts/${ctx.projects.p1}/${k.id}`], ['payment_transaction', `#/payments/${ctx.projects.p1}/${m.id}`]].sort());
+    // the related-documents list was removed (Update 13): the item's window only lists its own files
+    expect((await viewer.get(`${P1}/budget/items/${fixed.id}/related`)).status).toBe(404);
     const before = await q('SELECT count(*)::int n FROM attachments');
     expect(before[0].n).toBeGreaterThan(0);
   });

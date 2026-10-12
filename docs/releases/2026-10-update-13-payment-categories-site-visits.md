@@ -20,32 +20,42 @@ This update adds **one migration: `009_payment_categories_site_visits.sql`**. It
 - No amount, transfer, slip, contract, budget link, status, finding or file is changed.
 
 ## 1. Payments: cost category and budget item
-- **Fields:** "Cost category" is the group from Master Items & Budget. It's a searchable dropdown in budget-page order, with an empty "Select category" option. "Related master budget item" is the budget line that receives the allocation.
-- **Linking an item:**
-  - Selecting a budget item sets its category.
-  - While an item is linked, the category is shown as derived and can't be edited. To change it, change or unlink the item.
-- **Choosing a category first** filters the items. With no category, all eligible items are listed.
-- **Category without an item:** allowed, and labelled "No budget item linked".
-- **Unlinking an item** keeps its category as the editable selection.
-- **New categories:** the payment form never accepts typed category text. Categories are added in Master Items & Budget → Manage categories (existing permission).
+- **One field in the form: "Related master budget item".** The separate Cost category dropdown was removed after staging review. Most budget categories hold a single item with the same name, so the two lists looked identical.
+- **The category always follows the item.** Linking an item sets the payment's category to the item's Master Items & Budget category, and the form shows it under the field. Explicitly unlinking the item clears it.
+- **Payments that already have a category but no item** keep it until an item is linked. An unrelated edit never changes it.
 
 **Server rules**
-- Category and item must belong to the project.
+- Item and category must belong to the project.
 - The item's category is authoritative; a conflicting pair is rejected.
-- Archived categories and items are refused for **new** links. Records that already use them stay viewable and editable.
-- An edit that touches neither field never reclassifies a record.
+- Archived items and categories are refused for new links, while existing links stay viewable and editable.
 - The existing payment permissions apply.
 
 **Totals**
-- Category-only payments count in project payment totals, and are not attributed to any budget item.
 - Budget item scheduled and paid amounts still come only from `budget_item_id`, so a transfer is counted once.
 - Control budget, finalized totals, miscellaneous, contract balance and scheduled-unpaid calculations are unchanged.
 
 **Where categories appear**
-- **List:** under each payment.
+- **List:** the category and budget line under each payment.
 - **Filter:** "All cost categories", "No category" and "Legacy text needing review".
 - **Search:** includes category and item names.
 - **CSV export:** "Cost category", "Budget item" and "Legacy category text (needs review)".
+- **Old free-text values** that didn't match are shown as legacy text for review. Linking a budget item classifies the payment.
+
+## 1b. Master Items & Budget attachments
+- The attachments window of a budget item now lists **only the files attached to that item**. The "Related documents on other records" list (contract and payment files) was removed, and its API endpoint (`GET /budget/items/:id/related`) is gone.
+- Contract and payment files stay on their own records and in Contracts & Documents → All project files.
+
+## 1c. File names garbled before the Arabic fix
+- **Background:** Update 12 fixed new uploads only. Older names stay as stored until someone reviews them.
+- **The register:** Contracts & Documents → All project files shows "Likely original: …" under each garbled name, and a banner leads to **Review names**.
+- **Review names** lists each reliable repair (old name → likely original, with its source record). The user picks which to apply.
+- **Applying a repair:**
+  - Sets only the display name.
+  - The stored file, id, links and original name never change, so the original can be restored or renamed again.
+  - Is checked per record with the same permission as renaming that file, and audited.
+  - Suggestions are recomputed on the server, never taken from the browser.
+- **What is detected:** names misread as Latin-1 and as Windows-1252. Real Latin names (e.g. "Café") are not touched.
+- **New endpoints:** `GET /documents/name-repairs`, `POST /documents/repair-names`.
 
 ## 2. Site Visits
 **Scheduling**

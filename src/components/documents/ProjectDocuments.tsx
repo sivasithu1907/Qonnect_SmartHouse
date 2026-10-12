@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Archive, Download, ExternalLink, Eye, FileText, FolderOpen, ListChecks, Pencil, Plus, RotateCcw, Search } from 'lucide-react';
+import { Archive, Download, ExternalLink, Eye, FileText, FolderOpen, ListChecks, Pencil, Plus, RotateCcw, Search, Wand2 } from 'lucide-react';
 import { patch, post } from '../../lib/api';
+import { useApi } from '../../lib/hooks';
 import { useSession } from '../../lib/session';
 import type { Project } from '../../lib/types';
 import { formatBytes, formatDate, formatDateTime } from '../../lib/format';
@@ -19,6 +20,8 @@ export interface ProjectDocument {
 export interface RegisterFile {
   id: string; entity_type: AttachmentEntityType; entity_id: string; kind: string; name: string; original_name: string; description: string;
   mime_type: string; size_bytes: number; created_at: string; uploaded_by_name: string | null; source_title: string | null; href: string; category: string | null;
+  /** likely original of a name garbled before the Arabic fix (only a suggestion) */
+  suggested_name?: string | null;
 }
 export interface DocumentsResponse { documents: ProjectDocument[]; register: RegisterFile[]; sources: AttachmentEntityType[] }
 
@@ -134,7 +137,9 @@ export function ProjectDocuments({ project, data, reload, focusId, onFocusHandle
             ))}
           </ul>
         )
-      ) : files.length === 0 ? (
+      ) : null}
+      {view === 'files' && <NameRepairs projectId={project.id} count={data.register.filter((f) => f.suggested_name).length} onDone={reload} />}
+      {view === 'documents' ? null : files.length === 0 ? (
         <EmptyState title="No files">No files match. Files are listed here from every record type you can open.</EmptyState>
       ) : (
         <ul className="divide-y divide-slate-100 border border-slate-200 rounded-xl bg-white" data-testid="register-list">
@@ -144,6 +149,7 @@ export function ProjectDocuments({ project, data, reload, focusId, onFocusHandle
                 <FileText className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
                 <div className="min-w-0">
                   <div className="text-sm font-semibold text-slate-900"><FileName name={f.name} /></div>
+                  {f.suggested_name && <div className="text-[11px] text-amber-800 flex items-center gap-1"><Wand2 className="w-3 h-3 shrink-0" />Likely original: <FileName name={f.suggested_name} /></div>}
                   <div className="text-xs text-slate-500 flex flex-wrap items-center gap-x-2 gap-y-0.5">
                     <Badge tone={SOURCE_TONE[f.entity_type] ?? 'slate'}>{DOCUMENT_SOURCE_LABELS[f.entity_type]}</Badge>
                     <a href={f.href} className="text-sky-700 hover:underline break-words" dir="auto">{f.source_title || 'Open record'}</a>
@@ -216,5 +222,62 @@ function DocumentDetails({ project, d, writable, onClose, onEdit, onChanged }: {
         )}
       </div>
     </Modal>
+  );
+}
+
+interface RepairRow { id: string; entity_type: AttachmentEntityType; source_title: string | null; href: string; current_name: string; suggested_name: string; can_fix: boolean }
+
+/**
+ * Files uploaded before the Arabic file-name fix may show garbled names. This lists the reliable repairs for review;
+ * applying them sets each file's display name only — the stored file, its id, links and original name never change.
+ */
+function NameRepairs({ projectId, count, onDone }: { projectId: string; count: number; onDone: () => Promise<void> | void }) {
+  const [open, setOpen] = useState(false);
+  const { data, reload } = useApi<RepairRow[]>(open ? `/api/projects/${projectId}/documents/name-repairs` : null);
+  const [pick, setPick] = useState<Record<string, boolean>>({});
+  const [busy, setBusy] = useState(false);
+  const { toast } = useUi();
+  if (!count) return null;
+  const fixable = (data ?? []).filter((r) => r.can_fix);
+  const chosen = fixable.filter((r) => pick[r.id] !== false);
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-sm text-amber-900" role="note" data-testid="name-repair-banner">
+        <Wand2 className="w-4 h-4 shrink-0" aria-hidden="true" />
+        <span className="flex-1 min-w-0"><b>{count} file name{count === 1 ? '' : 's'}</b> look{count === 1 ? 's' : ''} garbled (uploaded before the Arabic file-name fix). The likely original can be restored for review.</span>
+        <Button size="sm" onClick={() => setOpen(true)}>Review names</Button>
+      </div>
+      <Modal open={open} wide title="Repair garbled file names" onClose={() => setOpen(false)}>
+        {!data ? <p className="text-sm text-slate-500">Loading…</p> : (
+          <div className="space-y-3">
+            <p className="text-xs text-slate-600">Each file keeps its stored copy, id, links and original name; only the name shown and used for downloads changes. You can rename any file again later.</p>
+            <ul className="divide-y divide-slate-100 border border-slate-200 rounded-lg" data-testid="name-repair-list">
+              {data.map((r) => (
+                <li key={r.id} className="px-3 py-2 flex items-start gap-3">
+                  <input type="checkbox" className="mt-1 rounded border-slate-300" disabled={!r.can_fix} checked={r.can_fix && pick[r.id] !== false}
+                    onChange={(e) => setPick((p) => ({ ...p, [r.id]: e.target.checked }))} aria-label={`Repair ${r.suggested_name}`} />
+                  <div className="min-w-0 text-xs">
+                    <div className="text-slate-400 line-through break-all">{r.current_name}</div>
+                    <div className="text-sm font-semibold text-slate-900"><FileName name={r.suggested_name} /></div>
+                    <div className="text-slate-500">{DOCUMENT_SOURCE_LABELS[r.entity_type]} · <a href={r.href} className="text-sky-700 hover:underline" dir="auto" onClick={() => setOpen(false)}>{r.source_title || 'Open record'}</a>{!r.can_fix && <span className="text-amber-800"> · you can’t rename files on this record</span>}</div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <div className="flex justify-end gap-2">
+              <Button onClick={() => setOpen(false)}>Cancel</Button>
+              <Button variant="primary" busy={busy} disabled={!chosen.length} onClick={async () => {
+                setBusy(true);
+                try {
+                  const r = await post<{ fixed: number }>(`/api/projects/${projectId}/documents/repair-names`, { ids: chosen.map((x) => x.id) });
+                  toast(`${r.fixed} file name${r.fixed === 1 ? '' : 's'} repaired (original names kept)`);
+                  setOpen(false); setPick({}); await reload(); await onDone();
+                } catch (e) { toast((e as Error).message, 'error'); } finally { setBusy(false); }
+              }}>Apply {chosen.length} repair{chosen.length === 1 ? '' : 's'}</Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+    </>
   );
 }

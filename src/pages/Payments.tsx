@@ -7,7 +7,7 @@ import type { FocusProps, BudgetResponse, ContractsResponse, PaymentMilestone, P
 import { formatDate, formatQAR, todayLocalISO } from '../lib/format';
 import { PAYEE_TYPE_LABELS, PAYEE_TYPES, PAYMENT_METHOD_LABELS, PAYMENT_METHODS } from '../../shared/constants';
 import { Attachments } from '../components/Attachments';
-import { BUDGET_KIND_TITLE, budgetItemOptions, sortBudgetCategories } from '../lib/budgetOrder';
+import { budgetItemOptions, sortBudgetCategories } from '../lib/budgetOrder';
 import { Badge, Button, Card, EmptyState, inputCls, Kpi, LinkButton, Modal, Notice, PageHeader, RecordForm, Spinner, StatusBadge, Table, Td, Th, useUi, type FieldSpec } from '../components/ui';
 import { DirectoryLinkBadge, useDirectoryLink } from '../components/directory/DirectoryLink';
 
@@ -45,10 +45,6 @@ export function Payments({ project, focusId, onFocusHandled }: { project: Projec
   const editingMilestone = edit?.kind === 'milestone' ? edit.row : null;
   const cats = sortBudgetCategories(budget?.categories ?? []);
   const items = budget?.items ?? [];
-  const keepCat = editingMilestone?.category_id ?? editingMilestone?.budget_category_id ?? null;
-  // Master Items & Budget categories in budget-page order; archived ones only when this record already uses them
-  const categoryOptions = cats.filter((c) => !c.archived_at || c.id === keepCat)
-    .map((c) => ({ value: c.id, label: c.name, group: BUDGET_KIND_TITLE[c.kind] ?? 'Other categories', archived: !!c.archived_at }));
   const itemOptionsFor = (catId: string | null | undefined) =>
     budgetItemOptions(catId ? cats.filter((c) => c.id === catId) : cats, items, editingMilestone?.budget_item_id);
   const categoryName = (id: string | null | undefined) => cats.find((c) => c.id === id)?.name ?? (id && id === editingMilestone?.category_id ? editingMilestone?.category_name : null) ?? null;
@@ -61,22 +57,20 @@ export function Payments({ project, focusId, onFocusHandled }: { project: Projec
     { name: 'payee_name', label: 'Payee name', required: true },
     ...dir.fields(editingMilestone, { label: 'Directory payee', help: 'Optional. Entries assigned to this project in Contacts. Linking keeps the payee name as typed and does not change any amount or payment.' }),
     ...(editingMilestone?.legacy_category ? [{ name: '_legacy', label: '', type: 'custom' as const, render: () => (
-      <Notice tone="amber">Recorded cost category text: <b>“{editingMilestone.legacy_category}”</b>. It is kept as entered{editingMilestone.category_name ? ` and differs from the category “${editingMilestone.category_name}”` : ' and is not matched to a budget category'}. {editingMilestone.budget_item_id ? 'The linked budget item decides the category.' : 'Select a category below to classify this payment.'}</Notice>
+      <Notice tone="amber">Recorded cost category text: <b>“{editingMilestone.legacy_category}”</b>. It is kept as entered{editingMilestone.category_name ? ` and differs from the category “${editingMilestone.category_name}”` : ' and is not matched to a budget category'}. {editingMilestone.budget_item_id ? 'The linked budget item decides the category.' : 'Link a budget item below to classify this payment.'}</Notice>
     ) }] : []),
-    { name: 'budget_category_id', label: 'Cost category', type: 'searchselect', nullable: true, options: categoryOptions,
-      noneLabel: 'Select category', noMatchLabel: 'No matching categories', searchPlaceholder: 'Search categories…',
-      fallbackLabel: editingMilestone?.category_name ?? undefined,
-      disabledFn: (v) => !!v.budget_item_id,
-      helpFn: (v) => v.budget_item_id
-        ? <>Set by the linked budget item ({categoryName(v.budget_category_id) ?? 'its category'}). To choose another category, change or unlink the budget item.</>
-        : v.budget_category_id ? <><b>No budget item linked.</b> The payment counts in project totals but not against a specific budget line.</>
-        : <>Categories come from Master Items &amp; Budget{can('categories.manage') ? ' (Manage categories)' : ''}. Choosing one narrows the budget items below.</> },
     { name: 'budget_item_id', label: 'Related master budget item', type: 'searchselect', nullable: true, wide: true,
-      optionsFn: (v) => itemOptionsFor(v.budget_item_id ? null : v.budget_category_id),
-      onChangeSet: (id, set) => { const it = items.find((i) => i.id === id); if (it) set('budget_category_id', it.category_id); },
+      options: itemOptionsFor(null),
       noneLabel: 'No budget item linked', noMatchLabel: 'No matching items', searchPlaceholder: 'Search items or categories…',
       fallbackLabel: editingMilestone?.budget_item_name ?? undefined,
-      help: 'Optional. Linking a budget item assigns this payment to that budget line and sets the category. It does not change any amount or mark anything paid.' },
+      helpFn: (v) => {
+        const it = items.find((i) => i.id === v.budget_item_id);
+        const keep = !v.budget_item_id && editingMilestone && !editingMilestone.budget_item_id && editingMilestone.category_name;
+        return <>
+          {it ? <>Cost category: <b>{categoryName(it.category_id) ?? '—'}</b> (from the budget item). </> : keep ? <>Cost category: <b>{editingMilestone!.category_name}</b> (kept from before; linking a budget item replaces it). </> : null}
+          Optional. Linking a budget item assigns this payment to that budget line; its category is set automatically. It does not change any amount or mark anything paid.
+        </>;
+      } },
     { name: 'contract_id', label: 'Contract', type: 'searchselect', nullable: true, options: contractOptions, hidden: !contracts, help: 'Optional. Contracts from this project only. Linking does not change any amount.' },
     { name: 'po_contract_ref', label: 'PO / contract reference' },
     { name: 'invoice_ref', label: 'Invoice reference' },
@@ -221,8 +215,10 @@ export function Payments({ project, focusId, onFocusHandled }: { project: Projec
         title={edit?.kind === 'milestone' ? (edit.row ? 'Edit payment milestone' : 'Schedule payment milestone') : edit?.row ? 'Edit transfer' : 'Record actual transfer'}
         subtitle={edit?.kind === 'tx' ? `${edit.milestone.payee_name} — ${edit.milestone.description} · pending ${formatQAR(edit.milestone.balance.pending)}` : 'A scheduled milestone is not a payment. Record transfers separately when money is actually paid.'}>
         {edit?.kind === 'milestone' && (
-          <RecordForm fields={milestoneFields} initial={edit.row ? { ...edit.row, budget_category_id: edit.row.category_id ?? edit.row.budget_category_id ?? null } : { payee_type: 'contractor', status: 'active' }} mode={edit.row ? 'edit' : 'create'} onCancel={() => setEdit(null)}
+          <RecordForm fields={milestoneFields} initial={edit.row ?? { payee_type: 'contractor', status: 'active' }} mode={edit.row ? 'edit' : 'create'} onCancel={() => setEdit(null)}
             onSubmit={async (v) => {
+              // the category always follows the budget item: linking sets it, an explicit unlink clears it
+              if ('budget_item_id' in v) v = { ...v, budget_category_id: items.find((i) => i.id === v.budget_item_id)?.category_id ?? null };
               if (edit.row) await patch(`${base}/milestones/${edit.row.id}`, v); else await post(`${base}/milestones`, v);
               toast('Milestone saved'); setEdit(null); await reload();
             }} />

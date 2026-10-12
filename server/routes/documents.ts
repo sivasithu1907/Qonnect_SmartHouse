@@ -20,7 +20,9 @@ import { getOwned, insertRow, patchOwned } from '../lib/crud';
 import { can, type Capability } from '../permissions';
 import type { Role } from '../../shared/constants';
 import { ATTACHMENT_ENTITY_TYPES, PROJECT_DOCUMENT_CATEGORIES, type AttachmentEntityType } from '../../shared/constants';
-import { effectiveFileName } from '../../shared/filenames';
+import { effectiveFileName, suggestRepairedName } from '../../shared/filenames';
+import { assertEntityAccess } from './attachments';
+import type { Request } from 'express';
 
 export const documentFields = z.object({
   title: zText(300).min(1, 'Title is required'),
@@ -117,6 +119,7 @@ export async function loadRegister(db: pg.Pool | pg.PoolClient, pid: string, rol
   return rows.map((r) => ({
     ...r,
     name: effectiveFileName(r),
+    suggested_name: r.display_name ? null : suggestRepairedName(r.original_name),
     href: `#/${section[r.entity_type as AttachmentEntityType]}/${pid}${r.source_id ? `/${r.source_id}` : ''}`,
   }));
 }
@@ -133,6 +136,44 @@ export function documentRoutes(pool: pg.Pool) {
       loadRegister(pool, pid, role),
     ]);
     res.json({ documents, register, sources: readableSourceTypes(role) });
+  });
+
+  // ---- reviewable repair of file names garbled before the Arabic fix (never automatic)
+  const canFix = async (req: Request, row: { entity_type: string; entity_id: string }) => {
+    try { await assertEntityAccess(pool, req, row.entity_type as AttachmentEntityType, row.entity_id, 'write'); return true; } catch { return false; }
+  };
+  r.get('/name-repairs', async (req, res) => {
+    assertCap(req, 'documents.read');
+    const reg = await loadRegister(pool, req.project!.id, req.user!.role);
+    const rows = reg.filter((x) => x.suggested_name);
+    const out = [];
+    for (const x of rows) {
+      out.push({ id: x.id, entity_type: x.entity_type, source_title: x.source_title, href: x.href, current_name: x.original_name, suggested_name: x.suggested_name, can_fix: await canFix(req, x) });
+    }
+    res.json(out);
+  });
+
+  r.post('/repair-names', async (req, res) => {
+    assertCap(req, 'documents.read');
+    const { ids } = parseBody(z.object({ ids: z.array(z.string().uuid()).min(1).max(500) }), req);
+    const pid = req.project!.id;
+    const done = await withTx(pool, async (c) => {
+      const fixed: string[] = [];
+      for (const id of ids) {
+        const { rows } = await c.query(`SELECT id, entity_type, entity_id, original_name, display_name, archived_at FROM attachments WHERE id = $1 AND project_id = $2 FOR UPDATE`, [id, pid]);
+        const a = rows[0];
+        if (!a || a.archived_at || a.display_name || !(ATTACHMENT_ENTITY_TYPES as readonly string[]).includes(a.entity_type)) continue;
+        const suggestion = suggestRepairedName(a.original_name); // recomputed on the server, never taken from the client
+        if (!suggestion) continue;
+        await assertEntityAccess(c, req, a.entity_type, a.entity_id, 'write'); // same rule as renaming the file
+        await c.query('UPDATE attachments SET display_name = $2 WHERE id = $1', [id, suggestion]);
+        await audit(c, req, { projectId: pid, action: 'update', entityType: 'attachment', entityId: id,
+          summary: `Repaired garbled file name: ${a.original_name} → ${suggestion} (original name kept)`, before: { display_name: null }, after: { display_name: suggestion } });
+        fixed.push(id);
+      }
+      return fixed;
+    });
+    res.json({ fixed: done.length, ids: done });
   });
 
   r.get('/:id', async (req, res) => {

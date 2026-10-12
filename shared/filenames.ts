@@ -43,12 +43,24 @@ export function effectiveFileName(a: { original_name: string; display_name?: str
  * Detects a name that was stored with its UTF-8 bytes read as Latin-1 (e.g. "Ø±Ø®ØµØ©.pdf") and returns
  * the likely original. Only a suggestion: nothing is changed unless a user applies it as the display name.
  */
+// Windows-1252 characters that stand for bytes 0x80–0x9F when UTF-8 was misread as cp1252 instead of Latin-1.
+const CP1252: Record<string, number> = {
+  '€': 0x80, '‚': 0x82, 'ƒ': 0x83, '„': 0x84, '…': 0x85, '†': 0x86, '‡': 0x87, 'ˆ': 0x88, '‰': 0x89, 'Š': 0x8a, '‹': 0x8b, 'Œ': 0x8c, 'Ž': 0x8e,
+  '‘': 0x91, '’': 0x92, '“': 0x93, '”': 0x94, '•': 0x95, '–': 0x96, '—': 0x97, '˜': 0x98, '™': 0x99, 'š': 0x9a, '›': 0x9b, 'œ': 0x9c, 'ž': 0x9e, 'Ÿ': 0x9f,
+};
+
 export function suggestRepairedName(name: string): string | null {
-  if (!name || ![...name].every((c) => c.charCodeAt(0) <= 0xff) || !/[À-ÿ]/.test(name)) return null;
-  const bytes = Uint8Array.from([...name].map((c) => c.charCodeAt(0)));
+  if (!name || !/[À-ÿ]/.test(name)) return null;
+  const bytes: number[] = [];
+  for (const c of name) {
+    const code = c.charCodeAt(0);
+    if (code <= 0xff) bytes.push(code);
+    else if (CP1252[c] !== undefined) bytes.push(CP1252[c]);
+    else return null; // a real non-Latin character: the name is not a misread one
+  }
   let decoded: string;
   try {
-    decoded = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    decoded = new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(bytes));
   } catch {
     return null;
   }

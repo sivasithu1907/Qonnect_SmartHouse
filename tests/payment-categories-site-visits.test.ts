@@ -243,3 +243,53 @@ describe('site visits: schedule → summary → findings and follow-up', () => {
     expect((await pm.get(`${P1}/visits/consultant`)).body.find((x: { id: string }) => x.id === c.body.id)).toMatchObject({ visit_state: 'Cancelled' });
   });
 });
+
+describe('payment form follow-up: the category follows the budget item', () => {
+  it('unlinking with an explicit empty category clears it; category-only records are kept until an item is linked', async () => {
+    const item = items.find((i) => i.name === 'Contractor Cost')!;
+    const m = (await pm.post(`${P1}/payments/milestones`, ms({ budget_item_id: item.id, budget_category_id: item.category_id }))).body;
+    const un = await pm.patch(`${P1}/payments/milestones/${m.id}`, { budget_item_id: null, budget_category_id: null });
+    expect(un.body).toMatchObject({ budget_item_id: null, budget_category_id: null });
+    const other = cats.find((c) => c.id !== item.category_id && !c.archived_at)!;
+    const catOnly = (await pm.post(`${P1}/payments/milestones`, ms({ budget_category_id: other.id }))).body;
+    expect((await pm.patch(`${P1}/payments/milestones/${catOnly.id}`, { notes: 'edited' })).body.budget_category_id).toBe(other.id);
+    expect((await pm.patch(`${P1}/payments/milestones/${catOnly.id}`, { budget_item_id: item.id, budget_category_id: item.category_id })).body.budget_category_id).toBe(item.category_id);
+  });
+});
+
+describe('garbled file names from before the Arabic fix: reviewable repair', () => {
+  const ORIGINAL = 'عقد المقاول - Phase 2 (1).pdf';
+  const latin1 = Buffer.from(ORIGINAL, 'utf8').toString('latin1');
+  const cp1252 = new TextDecoder('windows-1252').decode(Buffer.from(ORIGINAL, 'utf8'));
+  let contractFile = '', paymentFile = '';
+  it('lists only reliable suggestions, with permission per record; viewers and contractors cannot apply', async () => {
+    const cat = (await pm.get(`${P1}/categories`)).body.contract[0].id;
+    const k = (await pm.post(`${P1}/contracts`, { title: 'Phase 2', category_id: cat, company_name: 'Mokabbir' })).body;
+    const ins = async (type: string, id: string, name: string) => (await q(`INSERT INTO attachments (project_id, entity_type, entity_id, kind, original_name, stored_name, mime_type, size_bytes, sha256)
+      VALUES ($1, $2, $3, 'supporting_document', $4, gen_random_uuid()::text || '.pdf', 'application/pdf', 10, 'abc') RETURNING id`, [ctx.projects.p1, type, id, name]))[0].id as string;
+    contractFile = await ins('contract', k.id, latin1);
+    const mid = (await pm.post(`${P1}/payments/milestones`, ms())).body.id;
+    paymentFile = await ins('payment_milestone', mid, cp1252);
+    await ins('contract', k.id, 'Café invoice.pdf'); // a real Latin name: no suggestion
+    const list = (await pm.get(`${P1}/documents/name-repairs`)).body;
+    expect(list.filter((r: { id: string }) => [contractFile, paymentFile].includes(r.id)).map((r: { suggested_name: string; can_fix: boolean }) => [r.suggested_name, r.can_fix]))
+      .toEqual([[ORIGINAL, true], [ORIGINAL, true]]);
+    expect(list.some((r: { current_name: string }) => r.current_name === 'Café invoice.pdf')).toBe(false);
+    const reg = (await pm.get(`${P1}/documents`)).body.register.find((f: { id: string }) => f.id === contractFile);
+    expect(reg.suggested_name).toBe(ORIGINAL);
+    expect((await viewer.get(`${P1}/documents/name-repairs`)).body.every((r: { can_fix: boolean }) => !r.can_fix)).toBe(true);
+    expect((await viewer.post(`${P1}/documents/repair-names`, { ids: [contractFile] })).status).toBe(403);
+    expect((await contractor.post(`${P1}/documents/repair-names`, { ids: [contractFile] })).status).toBe(403);
+    expect((await pm2.post(`${P2}/documents/repair-names`, { ids: [contractFile] })).body.fixed).toBe(0); // other project: skipped
+  });
+  it('applying sets the display name only; the original stays; it is audited and repeatable', async () => {
+    const r = await pm.post(`${P1}/documents/repair-names`, { ids: [contractFile, paymentFile] });
+    expect(r.body.fixed).toBe(2);
+    const rows = await q(`SELECT id, original_name, display_name, stored_name FROM attachments WHERE id = ANY($1::uuid[])`, [[contractFile, paymentFile]]);
+    for (const row of rows) { expect(row.display_name).toBe(ORIGINAL); expect(row.stored_name).toMatch(/\.pdf$/); }
+    expect(rows.find((x) => x.id === contractFile)!.original_name).toBe(latin1);
+    expect((await q(`SELECT count(*)::int AS n FROM audit_log WHERE entity_type = 'attachment' AND entity_id = ANY($1::text[]) AND summary LIKE 'Repaired garbled file name%'`, [[contractFile, paymentFile]]))[0].n).toBe(2);
+    expect((await pm.post(`${P1}/documents/repair-names`, { ids: [contractFile] })).body.fixed).toBe(0);
+    expect((await pm.get(`${P1}/documents/name-repairs`)).body.some((x: { id: string }) => x.id === contractFile)).toBe(false);
+  });
+});

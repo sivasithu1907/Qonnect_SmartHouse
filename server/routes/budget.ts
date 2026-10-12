@@ -3,8 +3,6 @@ import { z } from 'zod';
 import type pg from 'pg';
 import { assertCap } from '../auth';
 import { badRequest, parseBody, parsePatch, uuidParam, zMoney, zQty, zText, zUrl } from '../lib/http';
-import { can } from '../permissions';
-import { effectiveFileName } from '../../shared/filenames';
 import { withTx } from '../db';
 import { audit, diff } from '../audit';
 import { getOwned, insertRow, patchOwned } from '../lib/crud';
@@ -129,38 +127,6 @@ export function budgetRoutes(pool: pg.Pool) {
   // Documents related to one budget item that live on other records (contracts linked to the item, payment
   // milestones linked to the item and their transfers). They are listed with a link to the original record and
   // are never copied; each part follows its own read permission.
-  r.get('/items/:id/related', async (req, res) => {
-    assertCap(req, 'budget.read');
-    const id = uuidParam(req, 'id');
-    const pid = req.project!.id;
-    await getOwned(pool, 'budget_items', pid, id);
-    const role = req.user!.role;
-    const fileSql = (types: string, idsSql: string) =>
-      `SELECT a.id, a.entity_type, a.entity_id, a.kind, a.original_name, a.display_name, a.mime_type, a.size_bytes, a.created_at
-         FROM attachments a WHERE a.project_id = $1 AND a.archived_at IS NULL AND a.entity_type IN (${types}) AND a.entity_id IN (${idsSql})
-        ORDER BY a.created_at DESC`;
-    const out: { contracts: unknown[]; milestones: unknown[]; files: unknown[] } = { contracts: [], milestones: [], files: [] };
-    if (can(role, 'contracts.read')) {
-      out.contracts = (await pool.query('SELECT id, title, company_name, status, archived_at FROM contracts WHERE project_id = $1 AND budget_item_id = $2 ORDER BY created_at', [pid, id])).rows;
-      const f = await pool.query(fileSql(`'contract'`, 'SELECT id FROM contracts WHERE project_id = $1 AND budget_item_id = $2'), [pid, id]);
-      out.files.push(...f.rows.map((a) => ({ ...a, name: effectiveFileName(a), source: 'contract', href: `#/contracts/${pid}/${a.entity_id}` })));
-    }
-    if (can(role, 'payments.read')) {
-      out.milestones = (await pool.query('SELECT id, payee_name, description, status, due_date, archived_at FROM payment_milestones WHERE project_id = $1 AND budget_item_id = $2 ORDER BY created_at', [pid, id])).rows;
-      const f = await pool.query(
-        `SELECT a.id, a.entity_type, a.entity_id, a.kind, a.original_name, a.display_name, a.mime_type, a.size_bytes, a.created_at,
-                COALESCE(t.milestone_id, m.id) AS milestone_id
-           FROM attachments a
-           LEFT JOIN payment_transactions t ON a.entity_type = 'payment_transaction' AND t.id = a.entity_id
-           LEFT JOIN payment_milestones m ON a.entity_type = 'payment_milestone' AND m.id = a.entity_id
-          WHERE a.project_id = $1 AND a.archived_at IS NULL
-            AND ((a.entity_type = 'payment_milestone' AND m.budget_item_id = $2)
-              OR (a.entity_type = 'payment_transaction' AND t.milestone_id IN (SELECT id FROM payment_milestones WHERE project_id = $1 AND budget_item_id = $2)))
-          ORDER BY a.created_at DESC`, [pid, id]);
-      out.files.push(...f.rows.map((a) => ({ ...a, name: effectiveFileName(a), source: a.entity_type, href: `#/payments/${pid}/${a.milestone_id}` })));
-    }
-    res.json(out);
-  });
 
   // ---- items (categories are managed in routes/categories.ts)
   r.post('/items', async (req, res) => {
