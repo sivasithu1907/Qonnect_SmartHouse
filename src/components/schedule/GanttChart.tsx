@@ -242,7 +242,26 @@ export function GanttChart({ phases, tasks, materials, materialCategories, today
         <p className="text-[11px] text-amber-700">Amber links: the task is planned to start before its predecessor's planned finish.</p>
       )}
 
-      {/* tasks with neither planned date — never auto-scheduled */}
+      {model.completedUndated.length > 0 && (
+        <details className="border border-slate-200 rounded-xl bg-white" data-testid="completed-undated">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-bold text-slate-900">
+            Completed without planned dates <span className="font-semibold text-slate-500">— {model.completedUndated.reduce((n, g) => n + g.tasks.length, 0)} task(s)</span>
+            <span className="block text-[11px] font-normal text-slate-500">Counted as completed. Not placed on the chart because no planned dates were entered; no date is invented.</span>
+          </summary>
+          <ul className="px-3 pb-2 divide-y divide-slate-100">
+            {model.completedUndated.flatMap(({ phase, tasks: list }) => list.map((t) => (
+              <li key={t.id} className="py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <button type="button" className="text-left min-w-0" onClick={() => onOpenTask(t)}>
+                  <span className="font-mono text-sky-700 mr-1">{phase.seq}.</span><span className="font-semibold text-slate-800">{t.name}</span>
+                </button>
+                <span className="text-emerald-700 font-semibold">{t.actual_end ? `Completed · ${formatDate(t.actual_end)}` : 'Completed · date not recorded'}</span>
+              </li>
+            )))}
+          </ul>
+        </details>
+      )}
+
+      {/* open tasks with neither planned date — never auto-scheduled */}
       <UnscheduledPanel groups={unschedGroups} noun={['task', 'tasks']} searchPlaceholder="Search unscheduled tasks"
         description="No planned start or finish yet. Open a task to enter its dates."
         emptyText="Every task has at least one planned date."

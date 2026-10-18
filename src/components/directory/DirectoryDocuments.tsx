@@ -1,12 +1,12 @@
 import React, { useRef, useState } from 'react';
-import { Download, Eye, FileText, Lock, Share2, Trash2, Upload } from 'lucide-react';
+import { Download, FileText, Lock, Share2, Trash2, Upload } from 'lucide-react';
 import { post, upload } from '../../lib/api';
 import { formatBytes, formatDateTime } from '../../lib/format';
 import type { DirectoryDocument } from '../../lib/directory';
 import { DIRECTORY_DOCUMENT_KIND_LABELS, DIRECTORY_DOCUMENT_KINDS } from '../../../shared/directory';
-import { PREVIEWABLE_MIME_TYPES } from '../../../shared/constants';
 import { Button, inputCls, useUi } from '../ui';
 import { FileName } from '../Attachments';
+import { PreviewButton } from '../FilePreview';
 
 /**
  * Directory documents through the scoped /api/directory routes: shared company documents (admin) and
@@ -68,7 +68,7 @@ export function DirectoryDocuments({ entryId, documents, canUploadShared, writab
                     </div>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
-                    {PREVIEWABLE_MIME_TYPES.includes(d.mime_type) && <a className="p-1.5 text-slate-500 hover:text-sky-700" href={`${base}/${d.id}/download?inline=1`} target="_blank" rel="noopener noreferrer" aria-label={`View ${d.original_name}`} title="View in a new tab"><Eye className="w-3.5 h-3.5" /></a>}
+                    <PreviewButton file={{ href: `${base}/${d.id}/download`, name: d.display_name || d.original_name, mime: d.mime_type }} />
                     <a className="p-1.5 text-slate-500 hover:text-sky-700" href={`${base}/${d.id}/download`} aria-label={`Download ${d.original_name}`} title="Download"><Download className="w-3.5 h-3.5" /></a>
                     {canArchive(d) && <button type="button" className="p-1.5 text-slate-400 hover:text-rose-600" aria-label={`Archive ${d.original_name}`} title="Archive"
                       onClick={async () => { if (await confirm(<>Archive <b>{d.original_name}</b>? It is kept for audit.</>, { title: 'Archive document', confirmLabel: 'Archive', danger: true })) { try { await post(`${base}/${d.id}/archive`); onChange(); } catch (ex) { toast((ex as Error).message, 'error'); } } }}><Trash2 className="w-3.5 h-3.5" /></button>}

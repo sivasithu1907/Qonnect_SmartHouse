@@ -1,15 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Archive, Download, ExternalLink, Eye, FileText, FolderOpen, ListChecks, Pencil, Plus, RotateCcw, Search, Wand2 } from 'lucide-react';
+import { Archive, Download, ExternalLink, FileText, FolderOpen, ListChecks, Pencil, Plus, RotateCcw, Search, Wand2 } from 'lucide-react';
 import { patch, post } from '../../lib/api';
 import { useApi } from '../../lib/hooks';
 import { useSession } from '../../lib/session';
 import type { Project } from '../../lib/types';
 import { formatBytes, formatDate, formatDateTime } from '../../lib/format';
 import {
-  DOCUMENT_SOURCE_LABELS, PREVIEWABLE_MIME_TYPES, PROJECT_DOCUMENT_CATEGORIES, PROJECT_DOCUMENT_CATEGORY_LABELS,
+  DOCUMENT_SOURCE_LABELS, PROJECT_DOCUMENT_CATEGORIES, PROJECT_DOCUMENT_CATEGORY_LABELS,
   type AttachmentEntityType, type ProjectDocumentCategory,
 } from '../../../shared/constants';
 import { Attachments, FileName, kindLabel } from '../Attachments';
+import { PreviewButton } from '../FilePreview';
 import { Badge, Button, EmptyState, inputCls, Modal, Notice, RecordForm, useUi, type FieldSpec } from '../ui';
 
 export interface ProjectDocument {
@@ -158,7 +159,7 @@ export function ProjectDocuments({ project, data, reload, focusId, onFocusHandle
                 </div>
               </div>
               <div className="flex items-center gap-1 sm:justify-end">
-                {PREVIEWABLE_MIME_TYPES.includes(f.mime_type) && <a className="p-1.5 text-slate-500 hover:text-sky-700" href={`/api/projects/${project.id}/attachments/${f.id}/download?inline=1`} target="_blank" rel="noopener noreferrer" aria-label={`Preview ${f.name}`} title="Preview"><Eye className="w-4 h-4" /></a>}
+                <PreviewButton file={{ href: `/api/projects/${project.id}/attachments/${f.id}/download`, name: f.name, mime: f.mime_type }} iconClass="w-4 h-4" />
                 <a className="p-1.5 text-slate-500 hover:text-sky-700" href={`/api/projects/${project.id}/attachments/${f.id}/download`} aria-label={`Download ${f.name}`} title="Download"><Download className="w-4 h-4" /></a>
                 <a className="p-1.5 text-slate-500 hover:text-sky-700" href={f.href} aria-label={`Open the ${DOCUMENT_SOURCE_LABELS[f.entity_type].toLowerCase()} this file belongs to`} title="Open the original record"><ExternalLink className="w-4 h-4" /></a>
               </div>

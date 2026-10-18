@@ -36,7 +36,9 @@ describe('phase summaries', () => {
       t('8', 'E', 'On Hold'),
     ];
     const ph = phaseSummaries([phase('A', 1), phase('B', 2, { planned_start: '2026-10-01', planned_end: '2026-11-30' }), phase('C', 3), phase('D', 4), phase('E', 5), phase('F', 6)], tasks);
-    expect(ph.map((p) => p.status)).toEqual(['Completed', 'In progress', 'Scheduled', 'Not scheduled', 'In progress', 'No tasks']);
+    // work status comes only from tasks; planning (schedule) is reported separately
+    expect(ph.map((p) => p.status)).toEqual(['Completed', 'In progress', 'Not started', 'Not started', 'In progress', 'No tasks']);
+    expect(ph.map((p) => p.schedule)).toEqual(['Not scheduled', 'Scheduled', 'Scheduled', 'Not scheduled', 'Not scheduled', 'Not scheduled']);
     expect(ph[1]).toMatchObject({ start: '2026-10-01', end: '2026-11-30', datesFrom: 'phase' });
     expect(ph[2]).toMatchObject({ start: '2026-12-01', end: '2026-12-31', datesFrom: 'tasks' });
     expect(ph[3]).toMatchObject({ start: null, end: null, datesFrom: null });
@@ -137,5 +139,24 @@ describe('date headings and material date lines', () => {
     expect(upcomingDateLine({ ...base, workflow: 'contractor', dateLabel: 'Planned completion' })).toEqual({ label: 'Planned completion', delivery: null });
     expect(upcomingDateLine({ ...base, workflow: 'owner', legacy: true, dateLabel: 'Required on site (previous date)' })).toEqual({ label: 'Required on site (previous date)', delivery: 'Dates need review in Material Supply' });
     expect(upcomingDateLine({ ...base, kind: 'task', dateLabel: 'Planned start' })).toEqual({ label: 'Planned start', delivery: null });
+  });
+});
+
+describe('phase work status and historical completion (Update 14)', () => {
+  it('3/3 completed is Completed, 2/3 In progress, none started Not started, no tasks never Completed; approval is irrelevant', async () => {
+    const { phaseWorkStatus, completionLabel } = await import('../src/lib/dashboard');
+    expect(phaseWorkStatus([{ status: 'Completed' }, { status: 'Completed' }, { status: 'Completed' }])).toBe('Completed');
+    expect(phaseWorkStatus([{ status: 'Completed' }, { status: 'Completed' }, { status: 'Not Scheduled' }])).toBe('In progress');
+    expect(phaseWorkStatus([{ status: 'Scheduled' }, { status: 'Not Scheduled' }])).toBe('Not started');
+    expect(phaseWorkStatus([])).toBe('No tasks');
+    const ph = phaseSummaries([phase('A', 1, { schedule_approved: true })], [t('1', 'A', 'Scheduled', { planned_start: '2026-11-01' })]);
+    expect(ph[0]).toMatchObject({ status: 'Not started', schedule: 'Scheduled', schedule_approved: true });
+    expect(completionLabel({ status: 'Completed', actual_end: null, completion_date_unknown: true }, (x) => x)).toBe('Completed · date not recorded');
+    expect(completionLabel({ status: 'Completed', actual_end: '2026-01-05' }, (x) => x)).toBe('Completed · 2026-01-05');
+    expect(completionLabel({ status: 'In Progress' }, (x) => x)).toBeNull();
+  });
+  it('completed tasks without dates count as done and never as unscheduled work', () => {
+    const c = taskCompletion([t('1', 'A', 'Completed'), t('2', 'A', 'Completed'), t('3', 'A', 'Not Scheduled'), t('4', 'A', 'Scheduled', { planned_end: '2026-11-01' })]);
+    expect(c).toMatchObject({ total: 4, done: 2, open: 2, unscheduled: 1 });
   });
 });

@@ -59,13 +59,13 @@ export function CreateProjectModal({ open, onClose, onCreated }: { open: boolean
 export function ProjectSettingsModal({ open, project, onClose, onSaved }: { open: boolean; project: Project | null; onClose: () => void; onSaved: (p: Project | null) => void }) {
   const { can } = useSession();
   const { toast, confirm } = useUi();
-  const [tab, setTab] = useState<'links' | 'details' | 'budget' | 'archive'>(can('projects.manage') ? 'details' : 'links');
+  const [tab, setTab] = useState<'links' | 'details' | 'budget' | 'progress' | 'archive'>(can('projects.manage') ? 'details' : 'links');
   if (!project) return null;
   const base = `/api/projects/${project.id}`;
   const tabs = [
     ...(can('projects.manage') ? [{ id: 'details' as const, label: 'Details' }] : []),
     { id: 'links' as const, label: 'Drive & Sheets links' },
-    ...(can('projects.manage') ? [{ id: 'budget' as const, label: 'Budget settings' }, { id: 'archive' as const, label: 'Archive' }] : []),
+    ...(can('projects.manage') ? [{ id: 'budget' as const, label: 'Budget settings' }, { id: 'progress' as const, label: 'Timeline progress' }, { id: 'archive' as const, label: 'Archive' }] : []),
   ];
   return (
     <Modal open={open} onClose={onClose} title="Project settings" subtitle={`${project.name} — ${project.code}`} wide>
@@ -100,6 +100,7 @@ export function ProjectSettingsModal({ open, project, onClose, onSaved }: { open
             onSubmit={async (v) => { const p = await patch<Project>(`${base}/settings`, v); toast('Budget settings saved'); onSaved(p); }} />
         </>
       )}
+      {tab === 'progress' && <HistoricalProgressSetting project={project} onSaved={onSaved} />}
       {tab === 'archive' && (
         <div className="space-y-3">
           <p className="text-sm text-slate-700">Archiving hides the project from non-admin users and makes it read-only. No records are deleted, and it can be restored at any time.</p>
@@ -131,5 +132,34 @@ export function ChangePasswordModal({ open, onClose }: { open: boolean; onClose:
           onSubmit={async (v) => { await post('/api/auth/change-password', v); toast('Password changed'); onClose(); }} />
       )}
     </Modal>
+  );
+}
+
+/** Admin-only switch for recording work completed before the project was entered into the application. */
+function HistoricalProgressSetting({ project, onSaved }: { project: Project; onSaved: (p: Project | null) => void }) {
+  const [on, setOn] = useState(!!project.allow_historical_progress);
+  const [busy, setBusy] = useState(false);
+  const { toast } = useUi();
+  return (
+    <div className="space-y-3 text-sm">
+      <label className="flex items-start gap-2">
+        <input type="checkbox" className="mt-1 rounded border-slate-300" checked={on} onChange={(e) => setOn(e.target.checked)} />
+        <span><b>Allow historical progress entry</b>
+          <span className="block text-xs text-slate-600">For a project that started before it was entered here. Authorised users can then mark tasks completed with “Exact completion date unknown” and complete several tasks of a phase in one reviewed step.</span>
+        </span>
+      </label>
+      <ul className="text-xs text-slate-500 list-disc ml-5 space-y-0.5">
+        <li>New projects have this off and follow the normal workflow (plan, start, record actual dates).</li>
+        <li>Nothing is marked completed automatically. Turning it off later keeps everything already recorded.</li>
+        <li>Completion statuses, dates and notes are never copied into other projects or templates.</li>
+      </ul>
+      <div className="flex justify-end">
+        <Button variant="primary" busy={busy} disabled={on === !!project.allow_historical_progress} onClick={async () => {
+          setBusy(true);
+          try { const p = await patch<Project>(`/api/projects/${project.id}/historical-progress`, { enabled: on }); toast(on ? 'Historical progress entry allowed' : 'Historical progress entry turned off'); onSaved(p); }
+          catch (e) { toast((e as Error).message, 'error'); } finally { setBusy(false); }
+        }}>Save</Button>
+      </div>
+    </div>
   );
 }

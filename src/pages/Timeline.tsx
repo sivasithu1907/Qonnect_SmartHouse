@@ -1,10 +1,12 @@
 import React, { useMemo, useState } from 'react';
-import { CalendarDays, ChevronDown, ChevronRight, Link2, Paperclip, Pencil, Plus, ShieldCheck } from 'lucide-react';
+import { CalendarDays, CheckCircle2, ChevronDown, ChevronRight, ListChecks, Link2, Paperclip, Pencil, Plus, RotateCcw, ShieldCheck } from 'lucide-react';
 import { ApiError, patch, post } from '../lib/api';
 import { useApi, useFocusRecord } from '../lib/hooks';
 import { useSession } from '../lib/session';
 import type { FocusProps, Member, MaterialItem, Phase, Project, Task, WorkUpdate } from '../lib/types';
-import { formatDate, todayLocalISO } from '../lib/format';
+import { formatDate, formatDateTime, todayLocalISO } from '../lib/format';
+import { completionLabel, pctLabel, phaseWorkStatus, PHASE_STATUS_TONE } from '../lib/dashboard';
+import { PhaseCompleteDialog, ReopenDialog, TaskCompleteDialog } from '../components/timeline/CompletionDialogs';
 import { TASK_STATUSES } from '../../shared/constants';
 import { Attachments } from '../components/Attachments';
 import { labelOf, materialOptions, timelineTaskOptions } from '../lib/options';
@@ -34,6 +36,8 @@ export function Timeline({ project, focusId, onFocusHandled }: { project: Projec
   const [filesFor, setFilesFor] = useState<string | null>(null);
   const [view, setView] = useState<'list' | 'gantt'>('list');
   const [detail, setDetail] = useState<Detail | null>(null);
+  const [flow, setFlow] = useState<{ kind: 'complete' | 'reopen'; task: Task } | { kind: 'phase'; phase: Phase } | null>(null);
+  const historical = !!project.allow_historical_progress;
 
   const taskById = useMemo(() => new Map((data?.tasks ?? []).map((t) => [t.id, t])), [data]);
   if (error) return <Notice tone="rose">{error}</Notice>;
@@ -59,7 +63,7 @@ export function Timeline({ project, focusId, onFocusHandled }: { project: Projec
     { name: 'planned_start', label: 'Planned start', type: 'date' },
     { name: 'planned_end', label: 'Planned finish', type: 'date' },
     { name: 'actual_start', label: 'Actual start', type: 'date' },
-    { name: 'actual_end', label: 'Actual completion', type: 'date', help: 'Required to mark the task completed.' },
+    { name: 'actual_end', label: 'Actual completion', type: 'date', help: row?.completion_date_unknown ? 'Recorded as completed with the exact date unknown. Enter a date here if it becomes known.' : 'Required to mark the task completed. Use “Mark completed” in the list for the guided workflow.' },
     { name: 'depends_on', label: 'Depends on (predecessors) — hold Ctrl/Cmd to select several', type: 'multiselect', options: timelineTaskOptions(data.phases, data.tasks, { excludeId: row?.id }) },
     { name: 'notes', label: 'Notes', type: 'textarea' },
   ];
@@ -107,23 +111,40 @@ export function Timeline({ project, focusId, onFocusHandled }: { project: Projec
           {data.phases.map((p) => {
             const tasks = data.tasks.filter((t) => t.phase_id === p.id);
             const done = tasks.filter((t) => t.status === 'Completed').length;
+            const work = phaseWorkStatus(tasks);
+            const blocked = tasks.filter((t) => t.status === 'Blocked').length;
+            const onHold = tasks.filter((t) => t.status === 'On Hold').length;
             const isOpen = open[p.id];
             return (
               <div key={p.id} className="bg-white border border-slate-200 rounded-xl shadow-2xs">
-                <div className="flex items-start justify-between gap-2 p-3">
-                  <button className="flex items-start gap-2 text-left min-w-0" onClick={() => setOpen((o) => ({ ...o, [p.id]: !o[p.id] }))}>
+                <div className="flex flex-wrap items-start justify-between gap-2 p-3">
+                  <button className="flex items-start gap-2 text-left min-w-0 flex-1 basis-64" onClick={() => setOpen((o) => ({ ...o, [p.id]: !o[p.id] }))}>
                     {isOpen ? <ChevronDown className="w-4 h-4 mt-0.5 text-slate-500 shrink-0" /> : <ChevronRight className="w-4 h-4 mt-0.5 text-slate-500 shrink-0" />}
                     <div className="min-w-0">
-                      <div className="text-sm font-semibold text-slate-900"><span className="font-mono text-sky-700 mr-1">{p.seq}.</span>{p.name}</div>
-                      <div className="text-[11px] text-slate-500 mt-0.5 flex flex-wrap gap-2">
-                        <span>{done}/{tasks.length} tasks completed</span>
-                        <span>{p.planned_start || p.planned_end ? `${formatDate(p.planned_start)} → ${formatDate(p.planned_end)}` : 'Not scheduled'}</span>
-                        {p.schedule_approved ? <Badge tone="emerald">Schedule approved</Badge> : <Badge>Template</Badge>}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-semibold text-slate-900"><span className="font-mono text-sky-700 mr-1">{p.seq}.</span>{p.name}</span>
+                        <Badge tone={PHASE_STATUS_TONE[work]}>{work}</Badge>
+                        {work !== 'Completed' && blocked > 0 && <Badge tone="rose">{blocked} blocked</Badge>}
+                        {work !== 'Completed' && onHold > 0 && <Badge tone="amber">{onHold} on hold</Badge>}
+                      </div>
+                      {tasks.length > 0 && (
+                        <div className="mt-1.5 flex items-center gap-2 max-w-md" data-testid="phase-progress">
+                          <div className="h-1.5 flex-1 rounded-full bg-slate-200 overflow-hidden" role="progressbar" aria-label={`Phase ${p.seq} task completion`} aria-valuemin={0} aria-valuemax={tasks.length} aria-valuenow={done} aria-valuetext={`${done} of ${tasks.length} tasks completed`}>
+                            <div className={`h-full rounded-full ${work === 'Completed' ? 'bg-emerald-500' : 'bg-sky-600'}`} style={{ width: `${(done / tasks.length) * 100}%` }} />
+                          </div>
+                          <span className="text-[11px] font-mono text-slate-600 whitespace-nowrap">{done}/{tasks.length} · {pctLabel(done, tasks.length)}</span>
+                        </div>
+                      )}
+                      <div className="text-[11px] text-slate-500 mt-1 flex flex-wrap items-center gap-2">
+                        {tasks.length === 0 && <span>No tasks</span>}
+                        <span>{p.planned_start || p.planned_end ? `Planned ${formatDate(p.planned_start)} → ${formatDate(p.planned_end)}` : 'Not scheduled'}</span>
+                        <span className={p.schedule_approved ? 'text-emerald-700' : 'text-slate-400'}>{p.schedule_approved ? 'Schedule approved' : 'Template schedule'}</span>
                       </div>
                     </div>
                   </button>
-                  {writable && <div className="flex gap-1 shrink-0">
-                    <Button size="sm" variant="ghost" onClick={() => setEdit({ kind: 'task', row: null, phaseId: p.id })}><Plus className="w-3.5 h-3.5" /></Button>
+                  {writable && <div className="flex flex-wrap justify-end gap-1 shrink-0 ml-auto">
+                    {historical && done < tasks.length && <Button size="sm" onClick={() => setFlow({ kind: 'phase', phase: p })} title="Record tasks of this phase that were already completed"><ListChecks className="w-3.5 h-3.5" /><span className="hidden sm:inline">Complete remaining tasks</span><span className="sm:hidden">Complete</span></Button>}
+                    <Button size="sm" variant="ghost" onClick={() => setEdit({ kind: 'task', row: null, phaseId: p.id })} aria-label={`Add task to phase ${p.seq}`}><Plus className="w-3.5 h-3.5" /></Button>
                     <Button size="sm" variant="ghost" onClick={() => setEdit({ kind: 'phase', row: p })}><Pencil className="w-3.5 h-3.5" /></Button>
                   </div>}
                 </div>
@@ -143,8 +164,8 @@ export function Timeline({ project, focusId, onFocusHandled }: { project: Projec
                                   <StatusBadge status={t.status} />
                                 </div>
                                 <div className="text-[11px] text-slate-500 mt-0.5">
-                                  {t.planned_start || t.planned_end ? `Planned ${formatDate(t.planned_start)} → ${formatDate(t.planned_end)}` : 'No planned dates'}
-                                  {t.actual_end && ` · Completed ${formatDate(t.actual_end)}`}
+                                  {completionLabel(t, formatDate) ? <span className="text-emerald-700 font-semibold">{completionLabel(t, formatDate)}</span> : null}
+                                  {t.planned_start || t.planned_end ? `${t.status === 'Completed' ? ' · ' : ''}Planned ${formatDate(t.planned_start)} → ${formatDate(t.planned_end)}` : t.status === 'Completed' ? '' : 'No planned dates'}
                                   {t.responsible && ` · ${t.responsible}`}
                                   {t.assigned_user_name && ` · Assigned: ${t.assigned_user_name}`}
                                 </div>
@@ -157,7 +178,12 @@ export function Timeline({ project, focusId, onFocusHandled }: { project: Projec
                                   </div>
                                 )}
                               </div>
-                              {writable && <Button size="sm" variant="ghost" onClick={() => setEdit({ kind: 'task', row: t })}><Pencil className="w-3.5 h-3.5" /></Button>}
+                              {writable && <div className="flex items-center gap-1 shrink-0">
+                                {t.status !== 'Completed'
+                                  ? <Button size="sm" variant="ghost" onClick={() => setFlow({ kind: 'complete', task: t })} aria-label={`Mark ${t.name} completed`} title="Mark completed"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /><span className="hidden md:inline">Mark completed</span></Button>
+                                  : <Button size="sm" variant="ghost" onClick={() => setFlow({ kind: 'reopen', task: t })} aria-label={`Reopen ${t.name}`} title="Reopen (correct an accidental completion)"><RotateCcw className="w-3.5 h-3.5" /></Button>}
+                                <Button size="sm" variant="ghost" onClick={() => setEdit({ kind: 'task', row: t })} aria-label={`Edit ${t.name}`}><Pencil className="w-3.5 h-3.5" /></Button>
+                              </div>}
                             </li>
                           );
                         })}
@@ -237,6 +263,9 @@ export function Timeline({ project, focusId, onFocusHandled }: { project: Projec
         )}
       </Modal>
       {dir.dialog}
+      {flow?.kind === 'complete' && <TaskCompleteDialog project={project} task={flow.task} byId={taskById} onClose={() => setFlow(null)} onDone={reload} />}
+      {flow?.kind === 'reopen' && <ReopenDialog project={project} task={flow.task} onClose={() => setFlow(null)} onDone={reload} />}
+      {flow?.kind === 'phase' && <PhaseCompleteDialog project={project} phase={flow.phase} tasks={data.tasks.filter((t) => t.phase_id === flow.phase.id)} byId={taskById} onClose={() => setFlow(null)} onDone={reload} />}
 
       <Modal open={!!detail} onClose={() => setDetail(null)}
         title={detail?.kind === 'task' ? detail.row.name : detail?.kind === 'phase' ? `${detail.row.seq}. ${detail.row.name}` : 'Materials & contractor work'}
@@ -272,7 +301,9 @@ function TaskDetail({ t, phase, taskById }: { t: Task; phase?: Phase; taskById: 
       <div className="flex flex-wrap items-center gap-1.5"><StatusBadge status={t.status} />{t.is_hold_point && <Badge tone="violet"><ShieldCheck className="w-3 h-3" />Hold point</Badge>}</div>
       {phase && <Field label="Phase">{phase.seq}. {phase.name}</Field>}
       <Field label="Planned">{formatDate(t.planned_start)} → {formatDate(t.planned_end)}{span.kind === 'range' && ` (${span.days} day${span.days === 1 ? '' : 's'})`}</Field>
-      <Field label="Actual">{formatDate(t.actual_start)} → {formatDate(t.actual_end)}</Field>
+      <Field label="Actual">{formatDate(t.actual_start)} → {t.status === 'Completed' && !t.actual_end ? 'date not recorded' : formatDate(t.actual_end)}</Field>
+      {t.status === 'Completed' && <Field label="Completion recorded">{t.completion_recorded_at ? `${formatDateTime(t.completion_recorded_at)}${t.completion_recorded_by_name ? ` by ${t.completion_recorded_by_name}` : ''}` : '—'}{t.completion_historical ? ' · historical entry' : ''}</Field>}
+      {t.completion_note && <Field label="Completion note">{t.completion_note}</Field>}
       <Field label="Assigned user">{t.assigned_user_name ?? '—'}</Field>
       <Field label="Responsible">{t.responsible || '—'}<DirectoryLinkBadge row={t} className="block" /></Field>
       {t.depends_on.length > 0 && <Field label="After">{t.depends_on.map((id) => taskById.get(id)?.name ?? '—').join('; ')}</Field>}
@@ -285,7 +316,7 @@ function TaskDetail({ t, phase, taskById }: { t: Task; phase?: Phase; taskById: 
 function PhaseDetail({ p, tasks }: { p: Phase; tasks: Task[] }) {
   return (
     <div className="space-y-2">
-      <div>{p.schedule_approved ? <Badge tone="emerald">Schedule approved</Badge> : <Badge>Template</Badge>}</div>
+      <div className="flex flex-wrap gap-1"><Badge tone={PHASE_STATUS_TONE[phaseWorkStatus(tasks)]}>{phaseWorkStatus(tasks)}</Badge>{p.schedule_approved ? <Badge>Schedule approved</Badge> : <Badge>Template schedule</Badge>}</div>
       <Field label="Planned">{formatDate(p.planned_start)} → {formatDate(p.planned_end)}</Field>
       <Field label="Actual">{formatDate(p.actual_start)} → {formatDate(p.actual_end)}</Field>
       <Field label="Tasks completed">{tasks.filter((t) => t.status === 'Completed').length}/{tasks.length}</Field>

@@ -207,6 +207,7 @@ export async function projectDashboard(pool: pg.Pool, project: Record<string, an
     ? timeline.tasks.map((t) => ({
         id: t.id, phase_id: t.phase_id, name: t.name, status: t.status, planned_start: t.planned_start, planned_end: t.planned_end,
         is_hold_point: t.is_hold_point, depends_on: t.depends_on, assigned: t.assigned_user_name || t.responsible || '', notes: t.notes,
+        actual_end: t.actual_end, completion_date_unknown: t.completion_date_unknown,
       }))
     : [];
   const upcoming = upcomingActivity(pid, today,

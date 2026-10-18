@@ -1,9 +1,10 @@
 import React, { useRef, useState } from 'react';
-import { Download, Eye, FileText, Paperclip, Pencil, Trash2, Upload, Wand2 } from 'lucide-react';
+import { Download, FileText, Paperclip, Pencil, Trash2, Upload, Wand2 } from 'lucide-react';
+import { PreviewButton } from './FilePreview';
 import { patch, post, upload } from '../lib/api';
 import { useApi } from '../lib/hooks';
 import { formatBytes, formatDateTime } from '../lib/format';
-import { ATTACHMENT_KIND_LABELS, attachmentKindsFor, PREVIEWABLE_MIME_TYPES, type AttachmentEntityType, type AttachmentKind } from '../../shared/constants';
+import { ATTACHMENT_KIND_LABELS, attachmentKindsFor, type AttachmentEntityType, type AttachmentKind } from '../../shared/constants';
 import { Button, inputCls, useUi } from './ui';
 
 export interface Att {
@@ -107,9 +108,7 @@ export function Attachments({ projectId, entityType, entityId, defaultKind, canU
                   </div>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                  {PREVIEWABLE_MIME_TYPES.includes(a.mime_type) && (
-                    <a className="p-1.5 text-slate-500 hover:text-sky-700" href={`${base}/${a.id}/download?inline=1`} target="_blank" rel="noopener noreferrer" title="Preview in a new tab" aria-label={`Preview ${a.name}`}><Eye className="w-3.5 h-3.5" /></a>
-                  )}
+                  <PreviewButton file={{ href: `${base}/${a.id}/download`, name: a.name, mime: a.mime_type }} />
                   <a className="p-1.5 text-slate-500 hover:text-sky-700" href={`${base}/${a.id}/download`} title="Download" aria-label={`Download ${a.name}`}><Download className="w-3.5 h-3.5" /></a>
                   {canUpload && <button type="button" className="p-1.5 text-slate-500 hover:text-sky-700" onClick={() => setEditing(editing === a.id ? null : a.id)} title="Rename / describe" aria-label={`Rename or describe ${a.name}`}><Pencil className="w-3.5 h-3.5" /></button>}
                   {canUpload && (canArchive ? canArchive(a) : true) && <button type="button" className="p-1.5 text-slate-400 hover:text-rose-600" onClick={() => archive(a)} title="Archive" aria-label={`Archive ${a.name}`}><Trash2 className="w-3.5 h-3.5" /></button>}

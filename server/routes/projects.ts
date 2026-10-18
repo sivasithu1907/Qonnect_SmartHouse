@@ -191,6 +191,24 @@ export function projectItemRoutes(pool: pg.Pool) {
     res.json(out);
   });
 
+  // "Allow historical progress entry": recording work completed before the project was entered (admin only).
+  // Turning it off later keeps everything already recorded; it only hides the historical options.
+  r.patch('/historical-progress', requireCap('projects.manage'), async (req, res) => {
+    const { enabled } = parseBody(z.object({ enabled: z.boolean() }), req);
+    const pid = req.project!.id;
+    const out = await withTx(pool, async (c) => {
+      const before = (await c.query('SELECT allow_historical_progress FROM projects WHERE id = $1 FOR UPDATE', [pid])).rows[0];
+      const { rows } = await c.query('UPDATE projects SET allow_historical_progress = $2, updated_at = now() WHERE id = $1 RETURNING *', [pid, enabled]);
+      if (before.allow_historical_progress !== enabled) {
+        await audit(c, req, { projectId: pid, action: 'update', entityType: 'project_settings', entityId: pid,
+          summary: enabled ? 'Allowed historical progress entry' : 'Turned off historical progress entry (recorded progress is kept)',
+          before: { allow_historical_progress: before.allow_historical_progress }, after: { allow_historical_progress: enabled } });
+      }
+      return rows[0];
+    });
+    res.json(out);
+  });
+
   r.post('/archive', requireCap('projects.manage'), async (req, res) => {
     const pid = req.project!.id;
     if (req.project!.archived_at) throw badRequest('Project is already archived');

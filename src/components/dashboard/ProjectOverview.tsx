@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { AlertTriangle, CalendarDays, ChevronDown, ChevronUp, Settings } from 'lucide-react';
 import type { Project } from '../../lib/types';
 import { formatDate } from '../../lib/format';
-import { pctLabel, phaseDisplayName, type DashTask, type Milestone, type PhaseSummary, taskCompletion } from '../../lib/dashboard';
+import { completionLabel, pctLabel, phaseDisplayName, type DashTask, type Milestone, type PhaseSummary, taskCompletion } from '../../lib/dashboard';
 import { Badge, Modal, StatusBadge } from '../ui';
 import { InfoPopover } from '../InfoPopover';
 import { linkBtn, Section } from './Section';
@@ -30,7 +30,7 @@ export function ProjectOverview({ project, tasks, phases, milestone, upcomingDay
 }) {
   const c = taskCompletion(tasks);
   const active = phases.filter((p) => p.status === 'In progress');
-  const scheduleNotSet = c.total > 0 && c.unscheduled === c.total;
+  const scheduleNotSet = c.open > 0 && c.unscheduled === c.open; // completed tasks never count as unscheduled work
   const warn = milestone?.kind === 'next' && (milestone.blockers.length > 0 || milestone.inDays <= upcomingDays - 1) ? milestone : null;
   const timelineHref = `#/timeline/${project.id}`;
   return (
@@ -156,7 +156,10 @@ export function PhaseTracker({ phases, onOpenPhase, initialLimit = 8 }: { phases
                     className={`w-full h-full text-left rounded-lg border px-3 py-2.5 flex flex-col gap-1.5 bg-white hover:bg-slate-50 transition-colors ${p.status === 'In progress' ? 'border-sky-400 ring-1 ring-sky-400' : 'border-slate-200'}`}>
                     <span className="flex items-center justify-between gap-2">
                       <span className="text-[11px] font-semibold text-slate-500">Phase {p.seq}</span>
-                      <Badge tone={phaseTone(p.status)}>{p.status}</Badge>
+                      <span className="flex items-center gap-1">
+                        {p.blocked + p.onHold > 0 && p.status !== 'Completed' && <Badge tone="rose">{p.blocked ? `${p.blocked} blocked` : `${p.onHold} on hold`}</Badge>}
+                        <Badge tone={phaseTone(p.status)}>{p.status}</Badge>
+                      </span>
                     </span>
                     <span className="text-sm font-semibold text-slate-900 leading-snug line-clamp-2">{title}</span>
                     {p.total > 0 ? (
@@ -169,7 +172,7 @@ export function PhaseTracker({ phases, onOpenPhase, initialLimit = 8 }: { phases
                       </span>
                     ) : <span className="text-xs text-slate-500">No tasks</span>}
                     <span className="flex items-center justify-between gap-2 text-xs text-slate-500">
-                      <span>{p.start || p.end ? `${formatDate(p.start)} → ${formatDate(p.end)}` : ''}</span>
+                      <span>{p.start || p.end ? `${formatDate(p.start)} → ${formatDate(p.end)}` : ''}{p.schedule_approved && <span className="ml-1 text-[10px] text-emerald-700">· schedule approved</span>}</span>
                       <span className="font-semibold text-sky-700">Details →</span>
                     </span>
                   </button>
@@ -191,7 +194,7 @@ export function PhaseDetails({ projectId, phase, allTasks, onClose }: { projectI
       {phase && (
         <div className="space-y-4">
           <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-            <div><dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</dt><dd className="mt-1"><Badge tone={phaseTone(phase.status)}>{phase.status}</Badge></dd></div>
+            <div><dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Work status</dt><dd className="mt-1 flex flex-wrap gap-1"><Badge tone={phaseTone(phase.status)}>{phase.status}</Badge>{phase.schedule_approved && <Badge tone="slate">Schedule approved</Badge>}</dd></div>
             <div><dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Tasks completed</dt><dd className="mt-1 font-semibold text-slate-800">{phase.total ? `${phase.done} of ${phase.total} · ${pctLabel(phase.done, phase.total)}` : 'No tasks'}</dd></div>
             <div><dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Planned start</dt><dd className="mt-1 font-semibold text-slate-800">{phase.start ? formatDate(phase.start) : 'Not scheduled'}</dd></div>
             <div><dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Planned finish</dt><dd className="mt-1 font-semibold text-slate-800">{phase.end ? formatDate(phase.end) : 'Not scheduled'}</dd></div>
@@ -205,7 +208,7 @@ export function PhaseDetails({ projectId, phase, allTasks, onClose }: { projectI
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm font-semibold text-slate-900 break-words">{t.name}{t.is_hold_point && <span className="ml-2 align-middle"><Badge tone="amber">Hold point</Badge></span>}</span>
                       <span className="block text-xs text-slate-500 mt-0.5">
-                        {t.planned_start || t.planned_end ? `${formatDate(t.planned_start)} → ${formatDate(t.planned_end)}` : 'Not scheduled'}
+                        {completionLabel(t, formatDate) ?? (t.planned_start || t.planned_end ? `${formatDate(t.planned_start)} → ${formatDate(t.planned_end)}` : 'Not scheduled')}
                         {t.assigned ? ` · ${t.assigned}` : ''}
                         {t.depends_on.length > 0 ? ` · after ${t.depends_on.map((id) => byId.get(id)?.name ?? 'another task').join(', ')}` : ''}
                       </span>

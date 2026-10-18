@@ -6,15 +6,38 @@ import { addDaysISO, fromCents, toCents, type ItemizedBudget } from '../../share
 export interface DashTask {
   id: string; phase_id: string; name: string; status: string; planned_start: string | null; planned_end: string | null;
   is_hold_point: boolean; depends_on: string[]; assigned: string; notes: string;
+  actual_end?: string | null; completion_date_unknown?: boolean;
 }
 export interface DashPhaseRow {
   id: string; seq: number; name: string; schedule_approved: boolean; planned_start: string | null; planned_end: string | null;
   total: number; completed: number;
 }
-export type PhaseStatus = 'Completed' | 'In progress' | 'Scheduled' | 'Not scheduled' | 'No tasks';
+/** Work status of a phase, derived only from its active tasks (schedule approval is separate). */
+export type PhaseStatus = 'Completed' | 'In progress' | 'Not started' | 'No tasks';
 export interface PhaseSummary extends DashPhaseRow {
   tasks: DashTask[]; done: number; blocked: number; onHold: number; status: PhaseStatus;
+  /** planning state, shown as secondary information: never a sign of work done */
+  schedule: 'Scheduled' | 'Not scheduled';
   start: string | null; end: string | null; datesFrom: 'phase' | 'tasks' | null;
+}
+
+/**
+ * Phase work status from its active tasks: Completed when every task is completed; In progress when any task is
+ * completed, in progress, blocked or on hold; otherwise Not started. A phase without tasks is "No tasks" — never Completed.
+ */
+export function phaseWorkStatus(tasks: Array<{ status: string }>): PhaseStatus {
+  if (!tasks.length) return 'No tasks';
+  const done = tasks.filter((t) => t.status === 'Completed').length;
+  if (done === tasks.length) return 'Completed';
+  if (done > 0 || tasks.some((t) => ['In Progress', 'Blocked', 'On Hold'].includes(t.status))) return 'In progress';
+  return 'Not started';
+}
+export const PHASE_STATUS_TONE: Record<PhaseStatus, 'emerald' | 'sky' | 'slate'> = { Completed: 'emerald', 'In progress': 'sky', 'Not started': 'slate', 'No tasks': 'slate' };
+
+/** "Completed · 12/03/2026", "Completed · date not recorded", or null for open tasks. */
+export function completionLabel(t: { status: string; actual_end?: string | null; completion_date_unknown?: boolean }, fmt: (iso: string) => string): string | null {
+  if (t.status !== 'Completed') return null;
+  return t.actual_end ? `Completed · ${fmt(t.actual_end)}` : 'Completed · date not recorded';
 }
 
 /** "n%" only with a denominator; never rounds to 0% or 100% unless it is exactly that. */
@@ -36,32 +59,29 @@ export function taskCompletion(tasks: DashTask[]) {
     inProgress: tasks.filter((t) => t.status === 'In Progress').length,
     blocked: tasks.filter((t) => t.status === 'Blocked').length,
     onHold: tasks.filter((t) => t.status === 'On Hold').length,
-    unscheduled: tasks.filter((t) => !t.planned_start && !t.planned_end).length,
+    /** open tasks without planned dates (completed tasks are never "pending scheduling") */
+    unscheduled: tasks.filter((t) => t.status !== 'Completed' && !t.planned_start && !t.planned_end).length,
   };
 }
 
 /**
- * Per-phase summary. Status comes only from task statuses: Completed when every task is completed,
- * In progress when a task is in progress / blocked / on hold or some (not all) are completed,
- * Scheduled when tasks or the phase have planned dates, otherwise Not scheduled.
+ * Per-phase summary. Work status comes only from task statuses (see phaseWorkStatus); the schedule state
+ * (Scheduled / Not scheduled) is reported separately and never implies progress.
  * Dates: the phase's own planned dates when entered, else the range of its tasks' planned dates.
  */
 export function phaseSummaries(phases: DashPhaseRow[], tasks: DashTask[]): PhaseSummary[] {
   return phases.map((p) => {
     const list = tasks.filter((t) => t.phase_id === p.id);
     const done = list.filter((t) => t.status === 'Completed').length;
-    const started = list.some((t) => ['In Progress', 'Blocked', 'On Hold'].includes(t.status)) || (done > 0 && done < list.length);
     const starts = list.map((t) => t.planned_start).filter(Boolean).sort() as string[];
     const ends = list.map((t) => t.planned_end).filter(Boolean).sort() as string[];
     const own = !!(p.planned_start || p.planned_end);
     const start = own ? p.planned_start : starts[0] ?? null;
     const end = own ? p.planned_end : ends[ends.length - 1] ?? null;
-    const status: PhaseStatus = !list.length ? 'No tasks'
-      : done === list.length ? 'Completed'
-      : started ? 'In progress'
-      : start || end || starts.length || ends.length ? 'Scheduled' : 'Not scheduled';
+    const status = phaseWorkStatus(list);
+    const schedule = start || end || starts.length || ends.length ? 'Scheduled' as const : 'Not scheduled' as const;
     return {
-      ...p, tasks: list, done, status, start, end, datesFrom: own ? 'phase' : start || end ? 'tasks' : null,
+      ...p, tasks: list, done, status, schedule, start, end, datesFrom: own ? 'phase' : start || end ? 'tasks' : null,
       blocked: list.filter((t) => t.status === 'Blocked').length, onHold: list.filter((t) => t.status === 'On Hold').length,
     };
   });

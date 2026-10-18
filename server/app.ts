@@ -103,7 +103,7 @@ export function createApp(pool: pg.Pool, cfg: AppConfig, opts: AppOptions = {}) 
   project.use('/documents', documentRoutes(pool));
   project.use('/materials', materialRoutes(pool, notifier, cfg.timeZone));
   project.use('/visits', visitRoutes(pool, notifier));
-  project.use('/timeline', timelineRoutes(pool, notifier));
+  project.use('/timeline', timelineRoutes(pool, notifier, cfg.timeZone));
   project.use('/work-updates', workUpdateRoutes(pool));
   project.use('/attachments', attachmentRoutes(pool, cfg));
   project.use('/directory', projectDirectoryRoute(pool));

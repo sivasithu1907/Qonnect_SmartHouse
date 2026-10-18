@@ -194,3 +194,22 @@ describe('page width', () => {
     expect(narrow).toEqual([]);
   });
 });
+
+describe('Gantt: completed tasks without planned dates (Update 14)', () => {
+  it('are listed separately, never in “Not scheduled”, and never placed on the chart with an invented date', () => {
+    const phases = [phase('A', 1)];
+    const tasks = [
+      task('done-unknown', 'A', { name: 'Excavation', status: 'Completed' }),
+      task('done-dated', 'A', { name: 'Footings', status: 'Completed', actual_end: '2026-01-10' }),
+      task('open', 'A', { name: 'Blockwork', status: 'Not Scheduled' }),
+    ];
+    const html = renderToStaticMarkup(<GanttChart phases={phases} tasks={tasks} materials={[]} today="2026-10-18" onOpenPhase={() => {}} onOpenTask={() => {}} onOpenMaterials={() => {}} />);
+    const done = html.slice(html.indexOf('data-testid="completed-undated"'));
+    expect(done).toContain('Completed · date not recorded');
+    expect(done).toContain('Completed · 10/01/2026');
+    const unsched = html.slice(html.indexOf('aria-label="Not scheduled"'));
+    expect(unsched).toContain('Blockwork');
+    expect(unsched).not.toContain('Excavation');
+    expect(unsched).not.toContain('Footings');
+  });
+});

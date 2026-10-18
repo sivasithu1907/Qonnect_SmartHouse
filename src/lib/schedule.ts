@@ -155,11 +155,13 @@ export const spanDates = (s: TaskSpan): string[] =>
 export interface GanttModel {
   phases: Array<{ phase: Phase; span: TaskSpan; tasks: Array<{ task: Task; span: TaskSpan }>; done: number; total: number }>;
   unscheduled: Array<{ phase: Phase; tasks: Task[] }>;
+  /** completed tasks without planned dates: listed separately, never placed on the chart or called unscheduled */
+  completedUndated: Array<{ phase: Phase; tasks: Task[] }>;
   scheduledCount: number;
 }
 export function buildGantt(phases: Phase[], tasks: Task[]): GanttModel {
   let scheduledCount = 0;
-  const out: GanttModel = { phases: [], unscheduled: [], scheduledCount: 0 };
+  const out: GanttModel = { phases: [], unscheduled: [], completedUndated: [], scheduledCount: 0 };
   for (const phase of phases) {
     const mine = tasks.filter((t) => t.phase_id === phase.id);
     const withSpan = mine.map((task) => ({ task, span: plannedSpan(task) }));
@@ -167,7 +169,10 @@ export function buildGantt(phases: Phase[], tasks: Task[]): GanttModel {
     scheduledCount += dated.length;
     out.phases.push({ phase, span: plannedSpan(phase), tasks: dated, done: mine.filter((t) => t.status === 'Completed').length, total: mine.length });
     const none = withSpan.filter((x) => x.span.kind === 'none').map((x) => x.task);
-    if (none.length) out.unscheduled.push({ phase, tasks: none });
+    const openNone = none.filter((t) => t.status !== 'Completed');
+    const doneNone = none.filter((t) => t.status === 'Completed');
+    if (openNone.length) out.unscheduled.push({ phase, tasks: openNone });
+    if (doneNone.length) out.completedUndated.push({ phase, tasks: doneNone });
   }
   out.scheduledCount = scheduledCount;
   return out;

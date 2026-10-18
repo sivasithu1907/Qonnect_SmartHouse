@@ -169,29 +169,54 @@ function unlockBodyScroll() {
 // closes (and loses) the form underneath.
 const modalStack: symbol[] = [];
 
-export function Modal({ open, title, onClose, children, wide, subtitle, portal }: { open: boolean; title: string; subtitle?: string; onClose: () => void; children: React.ReactNode; wide?: boolean; /** render into document.body (for a dialog opened from inside another dialog) */ portal?: boolean }) {
-  const ref = useRef<HTMLDivElement>(null);
+const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]):not([type=hidden]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+/**
+ * Shared behaviour of every dialog layer (Modal and the file preview): page scroll lock, Escape closes only the
+ * top-most layer, Tab stays inside the top-most layer, and focus returns to the element that opened it.
+ */
+export function useDialogLayer(open: boolean, ref: React.RefObject<HTMLElement | null>, onClose: () => void, autofocus = '[data-autofocus],input:not([type=hidden]),select,textarea,button:not([aria-label=Close])') {
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   useEffect(() => {
     if (!open) return;
+    const opener = document.activeElement as HTMLElement | null;
     lockBodyScroll();
     const me = Symbol('modal');
     modalStack.push(me);
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && modalStack[modalStack.length - 1] === me) closeRef.current(); };
+    const top = () => modalStack[modalStack.length - 1] === me;
+    const onKey = (e: KeyboardEvent) => {
+      if (!top()) return;
+      if (e.key === 'Escape') { e.stopPropagation(); closeRef.current(); return; }
+      if (e.key === 'Tab' && ref.current) {
+        const items = [...ref.current.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((x) => x.offsetParent !== null || x === document.activeElement);
+        if (!items.length) return;
+        const first = items[0], last = items[items.length - 1];
+        if (!ref.current.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+        else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    };
     document.addEventListener('keydown', onKey);
-    ref.current?.querySelector<HTMLElement>('[data-autofocus],input:not([type=hidden]),select,textarea,button:not([aria-label=Close])')?.focus();
+    (ref.current?.querySelector<HTMLElement>(autofocus) ?? ref.current)?.focus();
     return () => {
       document.removeEventListener('keydown', onKey);
       const i = modalStack.indexOf(me);
       if (i >= 0) modalStack.splice(i, 1);
       unlockBodyScroll();
+      // back to the button that opened the dialog, if it is still on the page
+      if (opener && document.contains(opener)) setTimeout(() => opener.focus({ preventScroll: true }), 0);
     };
-  }, [open]);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+export function Modal({ open, title, onClose, children, wide, subtitle, portal }: { open: boolean; title: string; subtitle?: string; onClose: () => void; children: React.ReactNode; wide?: boolean; /** render into document.body (for a dialog opened from inside another dialog) */ portal?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useDialogLayer(open, ref, onClose);
   if (!open) return null;
   const dialog = (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-6 bg-slate-900/40 backdrop-blur-[1px]" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={ref} role="dialog" aria-modal="true" aria-label={title}
+      <div ref={ref} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1}
         className={`w-full ${wide ? 'max-w-4xl' : 'max-w-xl'} max-h-full flex flex-col bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden`}>
         <div className="shrink-0 flex items-start justify-between gap-3 px-5 pt-4 pb-3 border-b border-slate-100">
           <div className="min-w-0">
