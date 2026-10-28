@@ -6,6 +6,7 @@
 //   database/tables/<table>.ndjson.gz       every row of one table: one JSON object per line
 //                                           (PostgreSQL row_to_json, read from one snapshot)
 //   files/<project-id|_directory>/<name>    every uploaded file referenced by an attachment row
+//   files/_avatars/<uuid>.webp              every profile picture referenced by a user row
 //   manifest.json                           written last: versions, counts, totals, checksums
 //
 // The archive is NOT encrypted. It contains project, financial and user data (including
@@ -25,7 +26,7 @@ export const EXCLUDED_TABLES = ['sessions', 'push_subscriptions'] as const;
 export const MIGRATIONS_TABLE = 'schema_migrations';
 
 export const TABLE_NAME_RE = /^[a-z_][a-z0-9_]{0,62}$/;
-export const FILE_DIR_RE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|_directory)$/;
+export const FILE_DIR_RE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|_directory|_avatars)$/;
 export const FILE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/;
 
 export interface ColumnInfo { name: string; type: string; generated: boolean; identity: '' | 'a' | 'd' }
@@ -65,6 +66,8 @@ export interface Manifest {
     missing: Array<{ id: string; path: string }>;
     mismatched: Array<{ id: string; path: string }>;
   };
+  /** profile pictures (absent in archives made before Update 15) */
+  avatars?: { rows: number; filesIncluded: number; missing: Array<{ id: string; path: string }> };
   complete: boolean;
   warnings: string[];
   encryption: 'none';
@@ -79,6 +82,12 @@ export function attachmentRelPath(row: { project_id: string | null; stored_name:
   const name = String(row.stored_name ?? '').split('/').pop() ?? '';
   if (!FILE_DIR_RE.test(dir) || !FILE_NAME_RE.test(name)) return null;
   return `${dir}/${name}`;
+}
+
+/** Archive-relative path of a user's profile picture, or null when there is none / the name is not safe. */
+export function avatarRelPath(row: { avatar_file?: string | null }): string | null {
+  const name = row.avatar_file ? String(row.avatar_file) : '';
+  return name && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.webp$/.test(name) ? `_avatars/${name}` : null;
 }
 
 /** Quotes an SQL identifier. Names come from the catalog or are validated with TABLE_NAME_RE. */

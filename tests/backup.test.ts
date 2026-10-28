@@ -9,6 +9,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import request from 'supertest';
 import pg from 'pg';
+import sharp from 'sharp';
 import { PASSWORD, PDF, PNG, setup, TEST_DB, type Agent, type Ctx } from './helpers';
 import { createPool } from '../server/db';
 import { createApp } from '../server/app';
@@ -154,6 +155,9 @@ beforeAll(async () => {
   await admin.post(`/api/directory/${ids.entry}/assignments`, { project_id: src.projects.p1, roles: ['subcontractor'] });
   expect((await admin.patch(`${P1}/contracts/${ids.contract}`, { directory_entry_id: ids.entry, directory_contact_id: ids.person })).status).toBe(200);
   ids.shared = (await admin.upload(`/api/directory/${ids.entry}/documents`, { kind: 'company_profile', visibility: 'shared' }, { buf: PDF, name: 'profile.pdf' })).body.id;
+  // a profile picture (stored under _avatars/, included in the backup and restored)
+  const face = await sharp({ create: { width: 64, height: 48, channels: 3, background: '#0ea5e9' } }).jpeg().toBuffer();
+  expect((await pm.upload(`/api/users/${src.users.pm}/avatar`, {}, { buf: face, name: 'me.jpg' })).status).toBe(200);
   // things a restore must not carry over: device push registrations (and sessions)
   await src.pool.query(`INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth) VALUES ($1, 'https://fcm.googleapis.com/x', 'k', 'a')`, [src.users.pm]);
   await src.pool.query(`INSERT INTO notification_preferences (user_id, push_enabled) VALUES ($1, true) ON CONFLICT (user_id) DO UPDATE SET push_enabled = true`, [src.users.pm]);
@@ -201,7 +205,8 @@ describe('backup (source installation)', () => {
     expect(names.at(-1)).toBe('manifest.json');
     expect(names).toContain('database/tables/payment_transactions.ndjson.gz');
     expect(names).toContain('database/tables/directory_entries.ndjson.gz');
-    expect(names.filter((n) => n.startsWith('files/'))).toHaveLength(3);
+    expect(names.filter((n) => n.startsWith('files/'))).toHaveLength(4);
+    expect(names.filter((n) => /^files\/_avatars\/[0-9a-f-]{36}\.webp$/.test(n))).toHaveLength(1);
     expect(names.some((n) => n.includes('sessions') || n.includes('push_subscriptions'))).toBe(false);
     const audit = (await src.pool.query(`SELECT action FROM audit_log WHERE entity_type = 'system_backup' ORDER BY id`)).rows.map((x) => x.action);
     expect(audit).toEqual(['backup_created', 'backup_downloaded']);
@@ -216,6 +221,7 @@ describe('backup (source installation)', () => {
     expect(m.totals.payment_transactions.amount).toBe('12345.68');
     expect(m.totals.contracts.contract_value).toBe('180000.25');
     expect(m.database.excludedTables).toEqual(['sessions', 'push_subscriptions']);
+    expect(m.avatars).toEqual({ rows: 1, filesIncluded: 1, missing: [] });
     expect(m.entries.length).toBe(entries.length - 1);
     const text = fs.readFileSync(archive).toString('latin1');
     expect(text).not.toContain('devpass'); // database password from the connection string
@@ -369,7 +375,7 @@ describe('restore into a fresh installation (new server)', () => {
     expect(op.error).toBeNull();
     expect(op.state).toBe('succeeded');
     const res = op.result as { preRestoreBackupId: string; previousSchema: string; pushPreferencesReset: number; files: { written: number } };
-    expect(res.files.written).toBe(3);
+    expect(res.files.written).toBe(4); // 3 attachments + 1 profile picture
     expect(res.pushPreferencesReset).toBe(1);
     expect(res.previousSchema).toMatch(/^pre_restore_/);
 

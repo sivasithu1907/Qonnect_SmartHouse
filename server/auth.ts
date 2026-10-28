@@ -41,7 +41,8 @@ export function sessionLoader(pool: pg.Pool, cfg: AppConfig) {
     if (typeof token === 'string' && token.length > 20 && token.length < 200) {
       const id = sha256(token);
       const { rows } = await pool.query(
-        `SELECT s.id, s.csrf_token, s.last_seen, u.id AS user_id, u.email, u.name, u.role
+        `SELECT s.id, s.csrf_token, s.last_seen, u.id AS user_id, u.email, u.name, u.role,
+                CASE WHEN u.avatar_file IS NULL THEN NULL ELSE (extract(epoch FROM u.avatar_updated_at) * 1000)::bigint::text END AS avatar_version
            FROM sessions s JOIN users u ON u.id = s.user_id
           WHERE s.id = $1 AND s.expires_at > now() AND u.is_active`,
         [id],
@@ -50,7 +51,7 @@ export function sessionLoader(pool: pg.Pool, cfg: AppConfig) {
         const r = rows[0];
         req.sessionId = r.id;
         req.csrfToken = r.csrf_token;
-        req.user = { id: r.user_id, email: r.email, name: r.name, role: r.role } satisfies AuthUser;
+        req.user = { id: r.user_id, email: r.email, name: r.name, role: r.role, avatar_version: r.avatar_version } satisfies AuthUser;
         // sliding expiry, written at most once every 5 minutes
         if (Date.now() - new Date(r.last_seen).getTime() > 5 * 60_000) {
           await pool.query(

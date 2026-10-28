@@ -4,7 +4,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import type pg from 'pg';
 import {
-  BACKUP_FORMAT, BACKUP_FORMAT_VERSION, EXCLUDED_TABLES, MIGRATIONS_TABLE, README, attachmentRelPath, fmtBytes, qi, tableEntryPath,
+  BACKUP_FORMAT, BACKUP_FORMAT_VERSION, EXCLUDED_TABLES, MIGRATIONS_TABLE, README, attachmentRelPath, avatarRelPath, fmtBytes, qi, tableEntryPath,
   type AppInfo, type Manifest, type ManifestTable, type SchemaFile,
 } from './format';
 import { describeSchema, listSequences, numericTotals, SNAPSHOT_SETTINGS } from './dbinfo';
@@ -89,6 +89,7 @@ export async function createBackup(
     const totals: Manifest['totals'] = {};
     const counts: Record<string, number> = {};
     const attachmentRows: Array<{ id: string; project_id: string | null; stored_name: string; sha256: string; size_bytes: number }> = [];
+    const avatarRows: Array<{ id: string; avatar_file: string }> = [];
     let projects: Manifest['summary']['projects'] = [];
     let serverVersion = '';
     try {
@@ -111,7 +112,8 @@ export async function createBackup(
       for (const t of described) {
         progress(`Exporting ${t.name}`, ++i, described.length);
         const file = path.join(work, `${t.name}.ndjson.gz`);
-        const onRow = t.name === 'attachments' ? (j: string) => { const r = JSON.parse(j); attachmentRows.push(r); } : undefined;
+        const onRow = t.name === 'attachments' ? (j: string) => { const r = JSON.parse(j); attachmentRows.push(r); }
+          : t.name === 'users' ? (j: string) => { const r = JSON.parse(j); if (r.avatar_file) avatarRows.push({ id: r.id, avatar_file: r.avatar_file }); } : undefined;
         const r = await exportTable(c, t.name, file, onRow);
         tables.push({ name: t.name, path: tableEntryPath(t.name), rows: r.rows, uncompressedBytes: r.uncompressedBytes });
         counts[t.name] = r.rows;
@@ -156,7 +158,22 @@ export async function createBackup(
       bytes += st.size;
       if (sha !== a.sha256 || st.size !== Number(a.size_bytes)) mismatched.push({ id: a.id, path: rel });
     }
+    // profile pictures
+    const avatarMissing: Array<{ id: string; path: string }> = [];
+    let avatarFiles = 0;
+    for (const a of avatarRows) {
+      const rel = avatarRelPath(a);
+      if (!rel) { avatarMissing.push({ id: a.id, path: String(a.avatar_file) }); continue; }
+      const full = path.join(deps.uploadDir, rel);
+      let st: fs.Stats;
+      try { st = fs.statSync(full); } catch { avatarMissing.push({ id: a.id, path: rel }); continue; }
+      if (!st.isFile()) { avatarMissing.push({ id: a.id, path: rel }); continue; }
+      await writer.addFile(`files/${rel}`, full, st.size);
+      avatarFiles++;
+      bytes += st.size;
+    }
     const warnings: string[] = [];
+    if (avatarMissing.length) warnings.push(`${avatarMissing.length} profile picture file(s) are missing from storage; those users will show initials after a restore.`);
     if (missing.length) warnings.push(`${missing.length} attachment file(s) are missing from storage and are NOT in this backup.`);
     if (mismatched.length) warnings.push(`${mismatched.length} attachment file(s) do not match their recorded checksum (already damaged in storage).`);
     const manifest: Manifest = {
@@ -169,6 +186,7 @@ export async function createBackup(
       totals,
       summary: { counts, projects, users: counts.users ?? 0 },
       attachments: { rows: attachmentRows.length, filesIncluded: added.size, bytes, missing, mismatched },
+      avatars: { rows: avatarRows.length, filesIncluded: avatarFiles, missing: avatarMissing },
       complete: missing.length === 0 && mismatched.length === 0,
       warnings, encryption: 'none',
       entries: [...writer.entries],

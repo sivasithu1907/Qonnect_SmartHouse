@@ -5,14 +5,18 @@ import { useApi } from '../lib/hooks';
 import type { Project } from '../lib/types';
 import { formatDateTime } from '../lib/format';
 import { ROLE_LABELS, ROLES } from '../../shared/constants';
+import { useSession } from '../lib/session';
+import { Avatar } from '../components/Avatar';
+import { ProfilePictureEditor } from '../components/ProfilePicture';
 import { Badge, Button, Card, Modal, Notice, PageHeader, RecordForm, Spinner, Table, Td, Th, useUi } from '../components/ui';
 
-interface UserRow { id: string; email: string; name: string; role: string; is_active: boolean; last_login_at: string | null; locked_until: string | null; project_ids: string[] }
+interface UserRow { id: string; email: string; name: string; role: string; is_active: boolean; last_login_at: string | null; locked_until: string | null; project_ids: string[]; avatar_version?: string | null }
 
 export function UsersAdmin({ projects }: { projects: Project[] }) {
   const { data, error, reload } = useApi<UserRow[]>('/api/users');
   const [edit, setEdit] = useState<{ row: UserRow | null } | null>(null);
   const { toast } = useUi();
+  const { user: me, refresh } = useSession();
   if (error) return <Notice tone="rose">{error}</Notice>;
   if (!data) return <Spinner />;
   const projectOptions = projects.map((p) => ({ value: p.id, label: `${p.name} — ${p.code}${p.archived_at ? ' (archived)' : ''}` }));
@@ -27,7 +31,7 @@ export function UsersAdmin({ projects }: { projects: Project[] }) {
           <tbody className="divide-y divide-slate-100">
             {data.map((u) => (
               <tr key={u.id}>
-                <Td className="font-semibold">{u.name}</Td>
+                <Td className="font-semibold"><span className="flex items-center gap-2.5 min-w-0"><Avatar userId={u.id} name={u.name} version={u.avatar_version} size="sm" /><span className="truncate">{u.name}</span></span></Td>
                 <Td>{u.email}</Td>
                 <Td><Badge tone={u.role === 'admin' ? 'violet' : 'slate'}>{ROLE_LABELS[u.role as keyof typeof ROLE_LABELS]}</Badge></Td>
                 <Td className="text-[11px]">{u.role === 'admin' ? 'All projects' : u.project_ids.length ? u.project_ids.map(label).join(', ') : <span className="text-amber-700">None assigned</span>}</Td>
@@ -40,6 +44,18 @@ export function UsersAdmin({ projects }: { projects: Project[] }) {
         </Table>
       </Card>
       <Modal open={!!edit} onClose={() => setEdit(null)} title={edit?.row ? `Edit ${edit.row.name}` : 'New user'} wide>
+        {edit?.row && (
+          <section aria-label="Profile picture" className="mb-5 pb-5 border-b border-slate-100">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Profile picture</h3>
+            <ProfilePictureEditor key={edit.row.id} userId={edit.row.id} name={edit.row.name} version={edit.row.avatar_version}
+              onChanged={async (v) => {
+                // only the picture changes; the form below keeps any unsaved edits
+                setEdit((e) => e?.row ? { row: { ...e.row, avatar_version: v } } : e);
+                await reload();
+                if (edit.row && edit.row.id === me.id) await refresh?.();
+              }} />
+          </section>
+        )}
         {edit && (
           <RecordForm mode={edit.row ? 'edit' : 'create'}
             initial={edit.row ? { name: edit.row.name, role: edit.row.role, isActive: edit.row.is_active, projectIds: edit.row.project_ids } : { role: 'viewer', projectIds: [], isActive: true }}

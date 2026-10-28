@@ -1,8 +1,8 @@
 import type { Role } from '../../shared/constants';
 import type { ItemizedBudget } from '../../shared/calc';
 
-export interface User { id: string; email: string; name: string; role: Role }
-export interface Member { id: string; name: string; role: Role }
+export interface User { id: string; email: string; name: string; role: Role; /** changes whenever the profile picture changes; null = no picture */ avatar_version?: string | null }
+export interface Member { id: string; name: string; role: Role; avatar_version?: string | null }
 
 export interface Project {
   id: string; code: string; name: string; location: string; description: string; client: string; status: string;
@@ -76,14 +76,14 @@ export interface ConsultantVisit extends DirectoryLinked {
   id: string; planned_at: string | null; consultant_name: string; consultant_user_id: string | null; consultant_user_name: string | null;
   purpose: string; areas_inspected: string; status: string; observations: string; instructions: string; next_visit_date: string | null;
   related_task_id: string | null; related_material_id: string | null; notes: string; archived_at: string | null; attachment_count: number; actions: VisitAction[];
-  actual_visit_at?: string | null; assigned_user_id?: string | null; assigned_user_name?: string | null; related_milestone_id?: string | null; cancel_reason?: string;
+  actual_visit_at?: string | null; assigned_user_id?: string | null; assigned_user_name?: string | null; assigned_user_avatar_version?: string | null; related_milestone_id?: string | null; cancel_reason?: string;
   visit_state?: 'Scheduled' | 'Completed' | 'Cancelled'; report_status?: 'Report pending' | 'Report uploaded'; report_count?: number; comment_count?: number;
   related_task_name?: string | null; related_milestone_payee?: string | null; related_milestone_description?: string | null;
   directory_contact_position?: string | null; directory_contact_mobile?: string | null; directory_contact_whatsapp?: string | null; directory_contact_email?: string | null;
   directory_entry_phone?: string | null; directory_entry_email?: string | null;
 }
 export interface SiteVisit extends DirectoryLinked {
-  id: string; visit_at: string | null; assigned_user_id: string | null; assigned_user_name: string | null; assigned_name: string;
+  id: string; visit_at: string | null; assigned_user_id: string | null; assigned_user_name: string | null; assigned_user_avatar_version?: string | null; assigned_name: string;
   purpose: string; areas: string; status: string; findings: string; related_task_id: string | null; related_material_id: string | null;
   related_consultant_visit_id: string | null; notes: string; archived_at: string | null; attachment_count: number; actions: VisitAction[];
   decisions?: string; actual_visit_at?: string | null; started_at?: string | null; cancel_reason?: string;
@@ -98,7 +98,7 @@ export interface Task extends DirectoryLinked {
   id: string; phase_id: string; template_key: string | null; name: string; description: string; is_hold_point: boolean;
   planned_start: string | null; planned_end: string | null; actual_start: string | null; actual_end: string | null;
   status: string; responsible: string; notes: string; sort_order: number; archived_at: string | null; depends_on: string[];
-  assigned_user_id: string | null; assigned_user_name: string | null;
+  assigned_user_id: string | null; assigned_user_name: string | null; assigned_user_avatar_version?: string | null;
   completion_date_unknown?: boolean; completion_note?: string; completion_recorded_at?: string | null; completion_recorded_by?: string | null; completion_historical?: boolean;
   completion_recorded_by_name?: string | null;
 }

@@ -45,7 +45,8 @@ export function authRoutes(pool: pg.Pool, cfg: AppConfig) {
     const csrf = await createSession(pool, cfg, u.id, req, res);
     req.user = { id: u.id, email: u.email, name: u.name, role: u.role };
     await audit(pool, req, { projectId: null, action: 'login', entityType: 'user', entityId: u.id, summary: 'Signed in' });
-    res.json({ user: { id: u.id, email: u.email, name: u.name, role: u.role }, csrfToken: csrf, capabilities: capabilitiesFor(u.role) });
+    const avatar_version = u.avatar_file ? String(new Date(u.avatar_updated_at).getTime()) : null;
+    res.json({ user: { id: u.id, email: u.email, name: u.name, role: u.role, avatar_version }, csrfToken: csrf, capabilities: capabilitiesFor(u.role) });
   });
 
   r.post('/logout', async (req, res) => {

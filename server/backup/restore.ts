@@ -15,7 +15,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import type pg from 'pg';
 import {
-  EXCLUDED_TABLES, FILE_DIR_RE, FILE_NAME_RE, MIGRATIONS_TABLE, attachmentRelPath, qi, tableEntryPath,
+  EXCLUDED_TABLES, FILE_DIR_RE, FILE_NAME_RE, MIGRATIONS_TABLE, attachmentRelPath, avatarRelPath, qi, tableEntryPath,
   type AppInfo, type Manifest, type SchemaFile,
 } from './format';
 import { describeSchema, foreignKeys, listTables, numericTotals, rowCount, schemaExists, SNAPSHOT_SETTINGS } from './dbinfo';
@@ -354,6 +354,10 @@ export async function restoreArchive(
       if (!have) throw new Error(`Attachment ${a.id} has no file after restoring`);
       if (have !== a.sha256 && !mismatchedIds.has(a.id)) throw new Error(`Attachment ${a.id} file checksum does not match its record`);
     }
+    // profile pictures: files were written with the other files above; a missing one only means initials are shown
+    const { rows: av } = await c.query(`SELECT id, avatar_file FROM users WHERE avatar_file IS NOT NULL`).catch(() => ({ rows: [] as Array<{ id: string; avatar_file: string }> }));
+    const avatarGone = av.filter((u) => { const rel = avatarRelPath(u); return !rel || !known.has(rel); }).length;
+    if (avatarGone) warnings.push(`${avatarGone} profile picture(s) were not in the backup; those users show initials.`);
     if (missingIds.size) warnings.push(`${missingIds.size} attachment record(s) were restored without a file (the file was already missing when the backup was made).`);
     if (opts.testFailAt === 'before_swap') throw new Error('Simulated failure before the switch (test)');
 

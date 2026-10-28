@@ -12,13 +12,14 @@ import { TASK_STATUSES } from '../../shared/constants';
 import { todayISO } from '../../shared/calc';
 import type { Notifier } from '../notify/notifier';
 import { taskAssignedEvents } from '../notify/events';
+import { avatarVersionSql } from './avatars';
 import { checkDirectoryLinks, directoryJoin, directoryLinkFields, directorySelect } from '../lib/directoryLinks';
 
 export async function loadTimeline(db: pg.Pool | pg.PoolClient, projectId: string, includeArchived = false) {
   const [ph, tk, dp] = await Promise.all([
     db.query('SELECT * FROM timeline_phases WHERE project_id = $1 AND ($2 OR archived_at IS NULL) ORDER BY seq, created_at', [projectId, includeArchived]),
     db.query(
-      `SELECT t.*, u.name AS assigned_user_name, cu.name AS completion_recorded_by_name, ${directorySelect('t')} FROM timeline_tasks t LEFT JOIN users u ON u.id = t.assigned_user_id
+      `SELECT t.*, u.name AS assigned_user_name, ${avatarVersionSql('u')} AS assigned_user_avatar_version, cu.name AS completion_recorded_by_name, ${directorySelect('t')} FROM timeline_tasks t LEFT JOIN users u ON u.id = t.assigned_user_id
          LEFT JOIN users cu ON cu.id = t.completion_recorded_by ${directoryJoin('t')}
         WHERE t.project_id = $1 AND ($2 OR t.archived_at IS NULL) ORDER BY t.sort_order, t.created_at`,
       [projectId, includeArchived],

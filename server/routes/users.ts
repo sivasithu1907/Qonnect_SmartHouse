@@ -7,6 +7,7 @@ import { badRequest, conflict, notFound, parseBody, uuidParam } from '../lib/htt
 import { hashPassword, passwordProblems } from '../lib/passwords';
 import { withTx } from '../db';
 import { audit } from '../audit';
+import { avatarVersionSql } from './avatars';
 
 const USER_COLS = 'id, email, name, role, is_active, last_login_at, locked_until, created_at';
 
@@ -16,7 +17,7 @@ export function userRoutes(pool: pg.Pool) {
 
   r.get('/', async (_req, res) => {
     const { rows } = await pool.query(
-      `SELECT ${USER_COLS.split(', ').map((c) => 'u.' + c).join(', ')},
+      `SELECT ${USER_COLS.split(', ').map((c) => 'u.' + c).join(', ')}, ${avatarVersionSql('u')} AS avatar_version,
               COALESCE(array_agg(m.project_id) FILTER (WHERE m.project_id IS NOT NULL), '{}') AS project_ids
          FROM users u LEFT JOIN project_members m ON m.user_id = u.id
         GROUP BY u.id ORDER BY u.is_active DESC, u.name`,

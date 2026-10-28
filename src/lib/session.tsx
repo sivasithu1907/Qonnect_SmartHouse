@@ -6,6 +6,8 @@ export interface Session {
   capabilities: string[];
   can: (cap: string) => boolean;
   logout: () => void;
+  /** re-read the signed-in user (e.g. after a profile picture change) without signing out */
+  refresh?: () => Promise<void>;
 }
 export const SessionContext = createContext<Session | null>(null);
 export function useSession(): Session {

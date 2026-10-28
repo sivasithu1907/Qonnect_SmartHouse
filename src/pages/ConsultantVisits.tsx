@@ -7,6 +7,7 @@ import { useApi, useFocusRecord } from '../lib/hooks';
 import { useSession } from '../lib/session';
 import type { FocusProps, ConsultantVisit, MaterialItem, Member, Phase, Project, Task } from '../lib/types';
 import { formatDateTime } from '../lib/format';
+import { AvatarName } from '../components/Avatar';
 import { visitState } from '../../shared/constants';
 import { formatPhone } from '../../shared/directory';
 import { Attachments } from '../components/Attachments';
@@ -257,7 +258,7 @@ function VisitPanel({ project, v, base, writable, manager, members, onClose, onC
           <Item label="Scheduled">{v.planned_at ? formatDateTime(v.planned_at) : 'Not set'}{v.status === 'Rescheduled' && <span className="block text-xs text-slate-500">Rescheduled — see activity history</span>}</Item>
           <Item label="Actual visit">{v.actual_visit_at ? formatDateTime(v.actual_visit_at) : st === 'Completed' ? 'Not recorded' : '—'}</Item>
           <Item label="Related task">{v.related_task_name ? <a className="text-sky-700 hover:underline" href={`#/timeline/${project.id}/${v.related_task_id}`} onClick={onClose}>{v.related_task_name}</a> : '—'}</Item>
-          <Item label="Internal responsible">{v.assigned_user_name || '—'}{v.consultant_user_name && <span className="block text-xs text-slate-500">Consultant account: {v.consultant_user_name}</span>}</Item>
+          <Item label="Internal responsible">{v.assigned_user_name ? <AvatarName userId={v.assigned_user_id} name={v.assigned_user_name} version={v.assigned_user_avatar_version} size="sm" /> : '—'}{v.consultant_user_name && <span className="block text-xs text-slate-500">Consultant account: {v.consultant_user_name}</span>}</Item>
           {v.related_milestone_id && (
             <Item label="Related payment">{can('payments.read') && v.related_milestone_payee
               ? <a className="text-sky-700 hover:underline" href={`#/payments/${project.id}/${v.related_milestone_id}`} onClick={onClose}>{v.related_milestone_payee} — {v.related_milestone_description}</a>

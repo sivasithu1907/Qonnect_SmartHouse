@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { StringDecoder } from 'node:string_decoder';
 import {
-  BACKUP_FORMAT, BACKUP_FORMAT_VERSION, EXCLUDED_TABLES, FILE_DIR_RE, FILE_NAME_RE, MIGRATIONS_TABLE, TABLE_NAME_RE, attachmentRelPath, tableEntryPath,
+  BACKUP_FORMAT, BACKUP_FORMAT_VERSION, EXCLUDED_TABLES, FILE_DIR_RE, FILE_NAME_RE, MIGRATIONS_TABLE, TABLE_NAME_RE, attachmentRelPath, avatarRelPath, tableEntryPath,
   type AppInfo, type Manifest, type SchemaFile,
 } from './format';
 import { entryStream, readEntryBuffer, readTar, type TarEntry } from './tar';
@@ -111,6 +111,7 @@ export async function validateArchive(file: string, opts: { app: AppInfo; maxByt
   const actual = new Map<string, { size: number; sha256: string }>();
   const tableRows = new Map<string, number>();
   const refs: Array<{ id: string; rel: string | null; sha256: string; stored: string }> = [];
+  const avatarRefs: Array<{ id: string; rel: string | null }> = [];
   let schema: SchemaFile | null = null;
   let manifest: Manifest | null = null;
   const budget = { left: opts.maxUncompressedBytes ?? DEFAULT_MAX_UNCOMPRESSED };
@@ -150,6 +151,9 @@ export async function validateArchive(file: string, opts: { app: AppInfo; maxByt
           const keys = Object.keys(obj);
           if (keys.length !== cols.size || keys.some((k) => !cols.has(k))) throw new Error(`${def.name}: row ${rows + 1} does not match the table's columns`);
           rows++;
+          if (def.name === 'users' && (obj as { avatar_file?: string | null }).avatar_file) {
+            avatarRefs.push({ id: String((obj as { id: string }).id), rel: avatarRelPath(obj as { avatar_file?: string | null }) });
+          }
           if (def.name === 'attachments') {
             const a = obj as { id: string; project_id: string | null; stored_name: string; sha256: string };
             refs.push({ id: String(a.id), rel: attachmentRelPath(a), sha256: String(a.sha256), stored: String(a.stored_name) });
@@ -229,6 +233,14 @@ export async function validateArchive(file: string, opts: { app: AppInfo; maxByt
     if (!f) { if (!missingIds.has(r.id)) err(`Attachment file missing from the archive: ${r.rel}`); continue; }
     if (f.sha256 !== r.sha256 && !mismatchedIds.has(r.id)) err(`Attachment file does not match its record checksum: ${r.rel}`);
   }
+  // profile pictures: a missing picture only means initials are shown, so it is a warning, not an error
+  const avatarMissingInManifest = new Set((m.avatars?.missing ?? []).map((x) => x.id));
+  let avatarAbsent = 0;
+  for (const a of avatarRefs) {
+    if (a.rel) referenced.add(`files/${a.rel}`);
+    if ((!a.rel || !actual.has(`files/${a.rel}`)) && !avatarMissingInManifest.has(a.id)) avatarAbsent++;
+  }
+  if (avatarAbsent) rep.warnings.push(`${avatarAbsent} profile picture file(s) are not in the archive; those users will show initials.`);
   for (const [p, f] of actual) {
     if (!p.startsWith('files/')) continue;
     filesIncluded++;

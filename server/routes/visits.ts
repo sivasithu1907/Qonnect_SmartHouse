@@ -10,6 +10,7 @@ import { can } from '../permissions';
 import { CONSULTANT_VISIT_STATUSES, SITE_VISIT_STATUSES, siteVisitState, visitState } from '../../shared/constants';
 import type { Notifier } from '../notify/notifier';
 import { consultantVisitEvents, siteVisitEvents } from '../notify/events';
+import { avatarVersionSql } from './avatars';
 import { checkDirectoryLinks, directoryJoin, directoryLinkFields, directorySelect } from '../lib/directoryLinks';
 
 const uuidOrNull = z.preprocess((v) => (v === '' ? null : v), z.string().uuid().nullable()).optional();
@@ -98,7 +99,7 @@ export function visitRoutes(pool: pg.Pool, notifier: Notifier) {
     const inc = req.query.includeArchived === '1';
     const [v, a] = await Promise.all([
       pool.query(
-        `SELECT v.*, u.name AS consultant_user_name, au.name AS assigned_user_name, ${directorySelect('v')},
+        `SELECT v.*, u.name AS consultant_user_name, au.name AS assigned_user_name, ${avatarVersionSql('au')} AS assigned_user_avatar_version, ${directorySelect('v')},
                 dc_v.position AS directory_contact_position, dc_v.mobile AS directory_contact_mobile, dc_v.whatsapp AS directory_contact_whatsapp, dc_v.email AS directory_contact_email,
                 de_v.phone AS directory_entry_phone, de_v.email AS directory_entry_email,
                 t.name AS related_task_name, pm.payee_name AS related_milestone_payee, pm.description AS related_milestone_description,
@@ -182,7 +183,7 @@ export function visitRoutes(pool: pg.Pool, notifier: Notifier) {
     const inc = req.query.includeArchived === '1';
     const [v, a] = await Promise.all([
       pool.query(
-        `SELECT v.*, u.name AS assigned_user_name, ${directorySelect('v')},
+        `SELECT v.*, u.name AS assigned_user_name, ${avatarVersionSql('u')} AS assigned_user_avatar_version, ${directorySelect('v')},
                 dc_v.position AS directory_contact_position, dc_v.mobile AS directory_contact_mobile, dc_v.whatsapp AS directory_contact_whatsapp, dc_v.email AS directory_contact_email,
                 de_v.phone AS directory_entry_phone, de_v.email AS directory_entry_email,
                 t.name AS related_task_name, mi.description AS related_material_description, cv.purpose AS related_consultant_visit_purpose, cv.planned_at AS related_consultant_visit_at,
@@ -394,7 +395,7 @@ export function visitRoutes(pool: pg.Pool, notifier: Notifier) {
     const pid = req.project!.id;
     await getOwned(pool, table, pid, id);
     const { rows } = await pool.query(
-      `SELECT cm.id, cm.body, cm.created_at, cm.author_id, u.name AS author_name
+      `SELECT cm.id, cm.body, cm.created_at, cm.author_id, u.name AS author_name, ${avatarVersionSql('u')} AS author_avatar_version
          FROM visit_comments cm LEFT JOIN users u ON u.id = cm.author_id
         WHERE cm.project_id = $1 AND cm.visit_type = $2 AND cm.visit_id = $3 AND cm.archived_at IS NULL
         ORDER BY cm.created_at`, [pid, type, id]);

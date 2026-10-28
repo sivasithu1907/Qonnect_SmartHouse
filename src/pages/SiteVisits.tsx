@@ -7,6 +7,7 @@ import { useApi, useFocusRecord } from '../lib/hooks';
 import { useSession } from '../lib/session';
 import type { FocusProps, ConsultantVisit, Member, Project, SiteVisit } from '../lib/types';
 import { formatDateTime, todayLocalISO } from '../lib/format';
+import { AvatarName } from '../components/Avatar';
 import { siteVisitState, type SiteVisitState } from '../../shared/constants';
 import { formatPhone } from '../../shared/directory';
 import { Attachments } from '../components/Attachments';
@@ -267,7 +268,7 @@ function VisitPanel({ project, v, base, writable, manager, members, today, onClo
           <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
             <Item label="Planned">{v.visit_at ? formatDateTime(v.visit_at) : 'Not set'}{v.status === 'Rescheduled' && <span className="block text-xs text-slate-500">Rescheduled — see activity history</span>}</Item>
             <Item label="Actual visit">{v.actual_visit_at ? formatDateTime(v.actual_visit_at) : st === 'Completed' ? 'Not recorded' : '—'}{v.started_at && <span className="block text-xs text-slate-500">Started {formatDateTime(v.started_at)}</span>}</Item>
-            <Item label="Assigned">{assigneeOf(v) || 'Unassigned'}{v.assigned_user_name && v.assigned_name && v.assigned_name !== v.assigned_user_name && <span className="block text-xs text-slate-500">Recorded name: {v.assigned_name}</span>}</Item>
+            <Item label="Assigned">{v.assigned_user_name ? <AvatarName userId={v.assigned_user_id} name={v.assigned_user_name} version={v.assigned_user_avatar_version} size="sm" /> : assigneeOf(v) || 'Unassigned'}{v.assigned_user_name && v.assigned_name && v.assigned_name !== v.assigned_user_name && <span className="block text-xs text-slate-500">Recorded name: {v.assigned_name}</span>}</Item>
             <Item label="Company / contact">
               {v.directory_entry_name || v.directory_contact_name ? <>
                 <span className="font-semibold">{v.directory_entry_name}</span>{v.directory_contact_name && <span> · {v.directory_contact_name}{v.directory_contact_position ? <span className="text-xs text-slate-500"> ({v.directory_contact_position})</span> : null}</span>}

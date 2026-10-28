@@ -6,6 +6,9 @@ import { projectsForSelector } from './lib/projects';
 import type { Project, Section, User } from './lib/types';
 import { PAGE_CONTAINER } from './lib/layout';
 import { Header, projectLabel } from './components/Header';
+import { Sidebar, TopBar } from './components/Sidebar';
+import { ProfilePictureModal } from './components/ProfilePicture';
+import { DESKTOP_LAYOUT_QUERY, readSidebarCollapsed, useMediaQuery, writeSidebarCollapsed } from './lib/media';
 import { Login } from './components/Login';
 import { ChangePasswordModal, CreateProjectModal, ProjectSettingsModal } from './components/ProjectForms';
 import { Spinner, UiProvider, EmptyState } from './components/ui';
@@ -63,7 +66,8 @@ export default function App() {
       // stop this (possibly shared) device receiving this user's alerts, then sign out
       void detachDeviceOnLogout().finally(() => post('/api/auth/logout').finally(() => { setAuth(null); window.location.hash = ''; }));
     },
-  } : null, [auth]);
+    refresh: async () => { applyAuth(await get('/api/auth/me')); },
+  } : null, [auth, applyAuth]);
 
   if (auth === undefined) return <Spinner />;
   return (
@@ -78,7 +82,11 @@ export default function App() {
 }
 
 function Shell() {
-  const { can } = useSession();
+  const { can, user, refresh } = useSession();
+  const desktop = useMediaQuery(DESKTOP_LAYOUT_QUERY);
+  const [collapsed, setCollapsed] = useState(readSidebarCollapsed);
+  const [pictureOpen, setPictureOpen] = useState(false);
+  useEffect(() => writeSidebarCollapsed(collapsed), [collapsed]);
   const canManageProjects = can('projects.manage');
   const initial = readHash();
   const [section, setSection] = useState<Section>(initial.section);
@@ -151,19 +159,8 @@ function Shell() {
   const needsProject = !['portfolio', 'users', 'notifications', 'backup'].includes(section);
   const focusProps = { focusId, onFocusHandled: () => setFocusId(null) };
 
-  return (
-    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
-      <Header
-        section={section}
-        onNavigate={setSection}
-        projects={selectable}
-        current={current}
-        onSelectProject={selectProject}
-        onCreateProject={() => setCreateOpen(true)}
-        onProjectSettings={() => setSettingsOpen(true)}
-        onChangePassword={() => setPwOpen(true)}
-        onInstallApp={() => setInstallOpen(true)}
-      />
+  const pageContent = (
+    <>
       <UpdateBanner />
       <RecoveryBanner onOpen={() => setSection('backup')} hidden={section === 'backup'} />
       <main className={`flex-1 min-w-0 py-6 sm:py-8 ${PAGE_CONTAINER}`}>
@@ -198,6 +195,28 @@ function Shell() {
           )}
         </div>
       </footer>
+    </>
+  );
+  const projectNav = {
+    section, onNavigate: setSection, projects: selectable, current, onSelectProject: selectProject,
+    onCreateProject: () => setCreateOpen(true), onProjectSettings: () => setSettingsOpen(true),
+  };
+  const account = { onChangePassword: () => setPwOpen(true), onInstallApp: () => setInstallOpen(true), onProfilePicture: () => setPictureOpen(true) };
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900">
+      {/* Wide windows: persistent left sidebar + compact top bar, the page using the remaining width.
+          Phones and tablets: the existing header and menu, unchanged. The page itself stays at the same place in
+          the tree, so resizing across the breakpoint swaps only the navigation and never resets an open page. */}
+      <div className={desktop ? 'flex min-h-screen' : ''}>
+        {desktop && <Sidebar {...projectNav} collapsed={collapsed} onToggleCollapsed={() => setCollapsed((c) => !c)} />}
+        <div className="flex-1 min-w-0 min-h-screen flex flex-col">
+          {desktop ? <TopBar section={section} current={current} onNavigate={setSection} {...account} /> : <Header {...projectNav} {...account} />}
+          {pageContent}
+        </div>
+      </div>
+      <ProfilePictureModal open={pictureOpen} onClose={() => setPictureOpen(false)} userId={user.id} name={user.name} version={user.avatar_version}
+        onChanged={async () => { await refresh?.(); }} />
       <CreateProjectModal open={createOpen} onClose={() => setCreateOpen(false)} onCreated={async (p) => { setCreateOpen(false); await loadProjects(); setProjectId(p.id); setSection('dashboard'); }} />
       <ProjectSettingsModal key={current?.id} open={settingsOpen} project={current} onClose={() => setSettingsOpen(false)} onSaved={async (p) => { setSettingsOpen(false); await onProjectSaved(p); }} />
       <ChangePasswordModal open={pwOpen} onClose={() => setPwOpen(false)} />

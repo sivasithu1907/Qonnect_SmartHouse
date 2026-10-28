@@ -4,6 +4,7 @@ import type pg from 'pg';
 import { assertCap, requireCap } from '../auth';
 import { badRequest, conflict, parseBody, zDate, zMoney, zText, zUrl } from '../lib/http';
 import { withTx } from '../db';
+import { avatarVersionSql } from './avatars';
 import { audit, diff } from '../audit';
 import { applyBudgetStructure, applyContractCategories, applyTimelineTemplate } from '../seed/apply';
 import { MISC_BASES } from '../../shared/constants';
@@ -233,7 +234,7 @@ export function projectItemRoutes(pool: pg.Pool) {
   /** Members of the project, for assignment pickers (names and roles only). */
   r.get('/members', async (req, res) => {
     const { rows } = await pool.query(
-      `SELECT u.id, u.name, u.role FROM users u
+      `SELECT u.id, u.name, u.role, ${avatarVersionSql('u')} AS avatar_version FROM users u
          JOIN project_members m ON m.user_id = u.id AND m.project_id = $1
         WHERE u.is_active ORDER BY u.name`,
       [req.project!.id],

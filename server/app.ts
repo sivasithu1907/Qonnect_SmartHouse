@@ -10,6 +10,7 @@ import { csrfGuard, projectScope, requireAuth, sessionLoader } from './auth';
 import { HttpError } from './lib/http';
 import { authRoutes } from './routes/auth';
 import { userRoutes } from './routes/users';
+import { avatarRoutes } from './routes/avatars';
 import { projectCollectionRoutes, projectItemRoutes } from './routes/projects';
 import { budgetRoutes } from './routes/budget';
 import { categoryRoutes } from './routes/categories';
@@ -87,6 +88,8 @@ export function createApp(pool: pg.Pool, cfg: AppConfig, opts: AppOptions = {}) 
 
   app.use('/api', sessionLoader(pool, cfg), csrfGuard(cfg));
   app.use('/api/auth', authRoutes(pool, cfg));
+  // profile pictures first: users may manage their own; user administrators manage everyone's (checked per route)
+  app.use('/api/users', requireAuth, avatarRoutes(pool, cfg));
   app.use('/api/users', requireAuth, userRoutes(pool));
   app.use('/api/portfolio', requireAuth, portfolioRoute(pool, cfg.timeZone));
   app.use('/api/notifications', requireAuth, notificationRoutes(pool, cfg, notifier));

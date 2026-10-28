@@ -5,6 +5,8 @@ export interface AuthUser {
   email: string;
   name: string;
   role: Role;
+  /** changes whenever the profile picture changes; null when there is none */
+  avatar_version?: string | null;
 }
 export interface ProjectRow {
   id: string;

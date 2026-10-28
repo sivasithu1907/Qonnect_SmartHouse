@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, History, MessageSquare } from 'lucide-react'
 import { post } from '../../lib/api';
 import { useApi } from '../../lib/hooks';
 import { formatDateTime } from '../../lib/format';
+import { Avatar } from '../Avatar';
 import { Button, Card, inputCls, useUi } from '../ui';
 
 // Building blocks shared by Consultant Visits and Site Visits (same look and behaviour).
@@ -75,7 +76,7 @@ export function VisitCalendar({ entries, onOpen }: { entries: CalendarEntry[]; o
 
 /** Comments with author and time; posting needs write access to the visit (checked on the server). */
 export function Comments({ base, type, visitId, canPost, onPosted }: { base: string; type: 'consultant' | 'site'; visitId: string; canPost: boolean; onPosted: () => Promise<void> | void }) {
-  const { data, reload } = useApi<Array<{ id: string; body: string; created_at: string; author_name: string | null }>>(`${base}/${type}/${visitId}/comments`);
+  const { data, reload } = useApi<Array<{ id: string; body: string; created_at: string; author_id: string | null; author_name: string | null; author_avatar_version?: string | null }>>(`${base}/${type}/${visitId}/comments`);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const { toast } = useUi();
@@ -85,9 +86,12 @@ export function Comments({ base, type, visitId, canPost, onPosted }: { base: str
       {!data ? <p className="text-xs text-slate-400">Loading…</p> : data.length === 0 ? <p className="text-xs text-slate-500 mb-2">No comments yet.</p> : (
         <ul className="space-y-2 mb-3">
           {data.map((c) => (
-            <li key={c.id} className="text-xs">
-              <p className="text-slate-500"><span className="font-semibold text-slate-700">{c.author_name ?? 'Unknown'}</span> · {formatDateTime(c.created_at)}</p>
-              <p className="text-slate-800 whitespace-pre-wrap break-words" dir="auto">{c.body}</p>
+            <li key={c.id} className="text-xs flex items-start gap-2">
+              <Avatar userId={c.author_id} name={c.author_name ?? '?'} version={c.author_avatar_version} size="sm" className="mt-0.5" />
+              <div className="min-w-0 flex-1">
+                <p className="text-slate-500"><span className="font-semibold text-slate-700">{c.author_name ?? 'Unknown'}</span> · {formatDateTime(c.created_at)}</p>
+                <p className="text-slate-800 whitespace-pre-wrap break-words" dir="auto">{c.body}</p>
+              </div>
             </li>
           ))}
         </ul>

@@ -5,6 +5,7 @@ import { useApi, useFocusRecord } from '../lib/hooks';
 import { useSession } from '../lib/session';
 import type { FocusProps, Member, MaterialItem, Phase, Project, Task, WorkUpdate } from '../lib/types';
 import { formatDate, formatDateTime, todayLocalISO } from '../lib/format';
+import { AvatarName } from '../components/Avatar';
 import { completionLabel, pctLabel, phaseWorkStatus, PHASE_STATUS_TONE } from '../lib/dashboard';
 import { PhaseCompleteDialog, ReopenDialog, TaskCompleteDialog } from '../components/timeline/CompletionDialogs';
 import { TASK_STATUSES } from '../../shared/constants';
@@ -167,7 +168,7 @@ export function Timeline({ project, focusId, onFocusHandled }: { project: Projec
                                   {completionLabel(t, formatDate) ? <span className="text-emerald-700 font-semibold">{completionLabel(t, formatDate)}</span> : null}
                                   {t.planned_start || t.planned_end ? `${t.status === 'Completed' ? ' · ' : ''}Planned ${formatDate(t.planned_start)} → ${formatDate(t.planned_end)}` : t.status === 'Completed' ? '' : 'No planned dates'}
                                   {t.responsible && ` · ${t.responsible}`}
-                                  {t.assigned_user_name && ` · Assigned: ${t.assigned_user_name}`}
+                                  {t.assigned_user_name && <> · Assigned: <AvatarName userId={t.assigned_user_id} name={t.assigned_user_name} version={t.assigned_user_avatar_version} /></>}
                                 </div>
                                 <DirectoryLinkBadge row={t} />
                                 {t.depends_on.length > 0 && (
@@ -304,7 +305,7 @@ function TaskDetail({ t, phase, taskById }: { t: Task; phase?: Phase; taskById: 
       <Field label="Actual">{formatDate(t.actual_start)} → {t.status === 'Completed' && !t.actual_end ? 'date not recorded' : formatDate(t.actual_end)}</Field>
       {t.status === 'Completed' && <Field label="Completion recorded">{t.completion_recorded_at ? `${formatDateTime(t.completion_recorded_at)}${t.completion_recorded_by_name ? ` by ${t.completion_recorded_by_name}` : ''}` : '—'}{t.completion_historical ? ' · historical entry' : ''}</Field>}
       {t.completion_note && <Field label="Completion note">{t.completion_note}</Field>}
-      <Field label="Assigned user">{t.assigned_user_name ?? '—'}</Field>
+      <Field label="Assigned user">{t.assigned_user_name ? <AvatarName userId={t.assigned_user_id} name={t.assigned_user_name} version={t.assigned_user_avatar_version} size="sm" /> : '—'}</Field>
       <Field label="Responsible">{t.responsible || '—'}<DirectoryLinkBadge row={t} className="block" /></Field>
       {t.depends_on.length > 0 && <Field label="After">{t.depends_on.map((id) => taskById.get(id)?.name ?? '—').join('; ')}</Field>}
       {t.description && <p className="text-xs text-slate-600 whitespace-pre-wrap">{t.description}</p>}

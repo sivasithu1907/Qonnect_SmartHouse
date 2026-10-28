@@ -2,8 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { PAGE_CONTAINER } from '../lib/layout';
 import {
   BookUser, Building2, CalendarDays, Check, ChevronDown, Coins, CreditCard, ExternalLink, FileSignature, FolderOpen, FolderPlus, FolderX, History, Layers, LayoutDashboard, LogOut,
-  DatabaseBackup, MapPin, Menu, Plus, Settings, Truck, UserCheck, Users, X, KeyRound, Bell, Download,
+  DatabaseBackup, MapPin, Menu, Plus, Settings, Truck, UserCheck, Users, X, KeyRound, Bell, Download, CircleUserRound,
 } from 'lucide-react';
+import { Avatar } from './Avatar';
 import { NotificationBell } from './NotificationBell';
 import { isStandalone } from '../lib/pwa';
 import type { Project, Section } from '../lib/types';
@@ -32,30 +33,13 @@ interface Props {
   onProjectSettings: () => void;
   onChangePassword: () => void;
   onInstallApp: () => void;
+  onProfilePicture?: () => void;
 }
 
-export function Header({ section, onNavigate, projects, current, onSelectProject, onCreateProject, onProjectSettings, onChangePassword, onInstallApp }: Props) {
-  const { user, can, logout } = useSession();
-  const [open, setOpen] = useState(false);
-  const [mobile, setMobile] = useState(false);
-  const [userMenu, setUserMenu] = useState(false);
-  const [query, setQuery] = useState('');
-  const searchRef = useRef<HTMLInputElement>(null);
-  const ref = useRef<HTMLDivElement>(null);
-  const uref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const h = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-      if (uref.current && !uref.current.contains(e.target as Node)) setUserMenu(false);
-    };
-    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') { setOpen(false); setUserMenu(false); } };
-    document.addEventListener('mousedown', h);
-    document.addEventListener('keydown', k);
-    return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k); };
-  }, []);
-  useEffect(() => { if (open) searchRef.current?.focus(); else setQuery(''); }, [open]);
-  const showSearch = projects.length >= PROJECT_SEARCH_MIN;
-  const nav: Array<{ id: Section; label: string; icon: React.FC<{ className?: string }>; show: boolean }> = [
+export type NavItem = { id: Section; label: string; icon: React.FC<{ className?: string }>; show: boolean };
+/** Project modules in their fixed order, each shown only to roles that can read it (the server enforces the same). */
+export function mainNav(can: (c: string) => boolean): NavItem[] {
+  return [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, show: true },
     { id: 'budget', label: 'Master Items & Budget', icon: Coins, show: can('budget.read') },
     { id: 'payments', label: 'Payments', icon: CreditCard, show: can('payments.read') },
@@ -67,6 +51,35 @@ export function Header({ section, onNavigate, projects, current, onSelectProject
     { id: 'contacts', label: 'Contacts', icon: BookUser, show: can('directory.read') },
     { id: 'audit', label: 'Audit', icon: History, show: can('audit.read') },
   ];
+}
+export const PORTFOLIO_NAV = { id: 'portfolio' as Section, label: 'All Projects', icon: Layers };
+/** Page titles for the compact desktop top bar. */
+export const SECTION_TITLES: Record<Section, string> = {
+  portfolio: 'All Projects', dashboard: 'Dashboard', budget: 'Master Items & Budget', payments: 'Payments', contracts: 'Contracts & Documents',
+  materials: 'Material Supply', consultant: 'Consultant Visits', site: 'Site Visits', timeline: 'Timeline', contacts: 'Contacts', audit: 'Audit',
+  users: 'Users & access', notifications: 'Notifications', backup: 'Backup & restore',
+};
+
+/** Close a popover on an outside click or Escape. */
+export function useDismiss(ref: React.RefObject<HTMLElement | null>, open: boolean, close: () => void) {
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) close(); };
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('mousedown', h);
+    document.addEventListener('keydown', k);
+    return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k); };
+  }, [ref, open, close]);
+}
+
+export function Header({ section, onNavigate, projects, current, onSelectProject, onCreateProject, onProjectSettings, onChangePassword, onInstallApp, onProfilePicture }: Props) {
+  const { can } = useSession();
+  const [open, setOpen] = useState(false);
+  const [mobile, setMobile] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const closeProjects = React.useCallback(() => setOpen(false), []);
+  useDismiss(ref, open, closeProjects);
+  const nav = mainNav(can);
   const go = (s: Section) => { onNavigate(s); setMobile(false); };
   const drive = current?.drive_folder_url ?? '';
   const navRef = useRef<HTMLElement>(null);
@@ -161,34 +174,9 @@ export function Header({ section, onNavigate, projects, current, onSelectProject
               {driveSegment}
             </div>
             {open && (
-              <div className="absolute left-0 top-full mt-1.5 w-80 max-w-[calc(100vw-1.5rem)] bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-50">
-                <div className="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100">Switch project</div>
-                {showSearch && (
-                  <div className="px-2 pt-2">
-                    <label htmlFor="project-search" className="sr-only">Search projects by name or code</label>
-                    <input id="project-search" ref={searchRef} type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search name or code…"
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400" />
-                  </div>
-                )}
-                <div className="max-h-72 overflow-y-auto py-1">
-                  <ProjectMenuList projects={projects} query={query} currentId={current?.id ?? null} onSelect={(id) => { onSelectProject(id); setOpen(false); }} />
-                </div>
-                <div className="pt-1 mt-1 border-t border-slate-100 px-2 space-y-1">
-                  <button onClick={() => { go('portfolio'); setOpen(false); }} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 rounded-lg">
-                    <Layers className="w-3.5 h-3.5 text-indigo-600" />Portfolio (all projects)
-                  </button>
-                  {current && (can('links.edit') || can('projects.manage')) && (
-                    <button onClick={() => { onProjectSettings(); setOpen(false); }} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 rounded-lg">
-                      <Settings className="w-3.5 h-3.5 text-slate-500" />Project settings & links
-                    </button>
-                  )}
-                  {can('projects.manage') && (
-                    <button onClick={() => { onCreateProject(); setOpen(false); }} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs font-semibold text-sky-600 hover:bg-sky-50 rounded-lg">
-                      <Plus className="w-3.5 h-3.5" />Create new project…
-                    </button>
-                  )}
-                </div>
-              </div>
+              <ProjectPopover className="absolute left-0 top-full mt-1.5" projects={projects} current={current}
+                onSelect={(id) => { onSelectProject(id); setOpen(false); }} onPortfolio={() => { go('portfolio'); setOpen(false); }}
+                onSettings={() => { onProjectSettings(); setOpen(false); }} onCreate={() => { onCreateProject(); setOpen(false); }} />
             )}
           </div>
 
@@ -196,30 +184,7 @@ export function Header({ section, onNavigate, projects, current, onSelectProject
           <div className="order-2 md:order-3 ml-auto flex items-center gap-1 sm:gap-2">
             <NotificationBell onOpenSettings={() => go('notifications')} />
             <span className="hidden md:block w-px h-7 bg-slate-200" aria-hidden="true" />
-            <div className="relative" ref={uref}>
-              <button type="button" onClick={() => setUserMenu(!userMenu)} aria-label={`Account menu for ${user.name}`} className="flex items-center gap-2 px-1.5 py-1.5 rounded-lg hover:bg-slate-100">
-                <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 text-slate-700 flex items-center justify-center text-xs font-bold">{user.name.slice(0, 1).toUpperCase()}</div>
-                <div className="hidden md:block text-left">
-                  <div className="text-[13px] font-bold text-slate-900 leading-tight">{user.name}</div>
-                  <div className="text-[11px] text-slate-500 leading-tight">{ROLE_LABELS[user.role]}</div>
-                </div>
-              </button>
-              {userMenu && (
-                <div className="absolute right-0 top-full mt-1.5 w-52 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-50">
-                  <div className="px-3 py-1.5 text-[11px] text-slate-500 border-b border-slate-100 truncate">{user.email}</div>
-                  {can('users.manage') && (
-                    <button onClick={() => { go('users'); setUserMenu(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"><Users className="w-3.5 h-3.5" />Users & access</button>
-                  )}
-                  {can('backup.manage') && (
-                    <button onClick={() => { go('backup'); setUserMenu(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"><DatabaseBackup className="w-3.5 h-3.5" />Backup & restore</button>
-                  )}
-                  <button onClick={() => { go('notifications'); setUserMenu(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"><Bell className="w-3.5 h-3.5" />Notifications</button>
-                  {!isStandalone() && <button onClick={() => { onInstallApp(); setUserMenu(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"><Download className="w-3.5 h-3.5" />Install app</button>}
-                  <button onClick={() => { onChangePassword(); setUserMenu(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"><KeyRound className="w-3.5 h-3.5" />Change password</button>
-                  <button onClick={logout} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-rose-700 hover:bg-rose-50"><LogOut className="w-3.5 h-3.5" />Sign out</button>
-                </div>
-              )}
-            </div>
+            <UserMenu onNavigate={go} onChangePassword={onChangePassword} onInstallApp={onInstallApp} onProfilePicture={onProfilePicture} />
             <button type="button" className="md:hidden w-11 h-11 flex items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100" onClick={() => setMobile(!mobile)} aria-label={mobile ? 'Close menu' : 'Open menu'} aria-expanded={mobile}>
               {mobile ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
@@ -281,5 +246,83 @@ export function ProjectMenuList({ projects, query, currentId, onSelect }: { proj
       {groups.archived.length > 0 && heading('Archived (read-only)')}
       {groups.archived.map(option)}
     </>
+  );
+}
+
+/** Project switcher panel (search, list, portfolio / settings / create). Shared by the top header and the desktop sidebar. */
+export function ProjectPopover({ projects, current, onSelect, onPortfolio, onSettings, onCreate, className = '' }: {
+  projects: Project[]; current: Project | null; onSelect: (id: string) => void; onPortfolio: () => void; onSettings: () => void; onCreate: () => void; className?: string;
+}) {
+  const { can } = useSession();
+  const [query, setQuery] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
+  const showSearch = projects.length >= PROJECT_SEARCH_MIN;
+  useEffect(() => { searchRef.current?.focus(); }, []);
+  return (
+    <div className={`w-80 max-w-[calc(100vw-1.5rem)] bg-white rounded-xl shadow-xl border border-slate-200 py-2 z-50 ${className}`}>
+      <div className="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100">Switch project</div>
+      {showSearch && (
+        <div className="px-2 pt-2">
+          <label htmlFor="project-search" className="sr-only">Search projects by name or code</label>
+          <input id="project-search" ref={searchRef} type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search name or code…"
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400" />
+        </div>
+      )}
+      <div className="max-h-72 overflow-y-auto py-1">
+        <ProjectMenuList projects={projects} query={query} currentId={current?.id ?? null} onSelect={onSelect} />
+      </div>
+      <div className="pt-1 mt-1 border-t border-slate-100 px-2 space-y-1">
+        <button type="button" onClick={onPortfolio} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 rounded-lg">
+          <Layers className="w-3.5 h-3.5 text-indigo-600" />Portfolio (all projects)
+        </button>
+        {current && (can('links.edit') || can('projects.manage')) && (
+          <button type="button" onClick={onSettings} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 rounded-lg">
+            <Settings className="w-3.5 h-3.5 text-slate-500" />Project settings & links
+          </button>
+        )}
+        {can('projects.manage') && (
+          <button type="button" onClick={onCreate} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs font-semibold text-sky-600 hover:bg-sky-50 rounded-lg">
+            <Plus className="w-3.5 h-3.5" />Create new project…
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Account button (avatar, name, role) and its menu. Shared by the top header and the desktop top bar. */
+export function UserMenu({ onNavigate, onChangePassword, onInstallApp, onProfilePicture }: {
+  onNavigate: (s: Section) => void; onChangePassword: () => void; onInstallApp: () => void; onProfilePicture?: () => void;
+}) {
+  const { user, can, logout } = useSession();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const close = React.useCallback(() => setOpen(false), []);
+  useDismiss(ref, open, close);
+  const item = 'w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 focus-visible:bg-slate-50';
+  const pick = (fn: () => void) => () => { setOpen(false); fn(); };
+  return (
+    <div className="relative" ref={ref}>
+      <button type="button" onClick={() => setOpen(!open)} aria-label={`Account menu for ${user.name}`} aria-expanded={open} aria-haspopup="true"
+        className="flex items-center gap-2 px-1.5 py-1.5 rounded-lg hover:bg-slate-100">
+        <Avatar userId={user.id} name={user.name} version={user.avatar_version} size="md" />
+        <div className="hidden md:block text-left">
+          <div className="text-[13px] font-bold text-slate-900 leading-tight">{user.name}</div>
+          <div className="text-[11px] text-slate-500 leading-tight">{ROLE_LABELS[user.role]}</div>
+        </div>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1.5 w-56 bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-50">
+          <div className="px-3 py-1.5 text-[11px] text-slate-500 border-b border-slate-100 truncate">{user.email}</div>
+          {onProfilePicture && <button type="button" onClick={pick(onProfilePicture)} className={item}><CircleUserRound className="w-3.5 h-3.5" />Profile picture</button>}
+          {can('users.manage') && <button type="button" onClick={pick(() => onNavigate('users'))} className={item}><Users className="w-3.5 h-3.5" />Users & access</button>}
+          {can('backup.manage') && <button type="button" onClick={pick(() => onNavigate('backup'))} className={item}><DatabaseBackup className="w-3.5 h-3.5" />Backup & restore</button>}
+          <button type="button" onClick={pick(() => onNavigate('notifications'))} className={item}><Bell className="w-3.5 h-3.5" />Notifications</button>
+          {!isStandalone() && <button type="button" onClick={pick(onInstallApp)} className={item}><Download className="w-3.5 h-3.5" />Install app</button>}
+          <button type="button" onClick={pick(onChangePassword)} className={item}><KeyRound className="w-3.5 h-3.5" />Change password</button>
+          <button type="button" onClick={logout} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-rose-700 hover:bg-rose-50"><LogOut className="w-3.5 h-3.5" />Sign out</button>
+        </div>
+      )}
+    </div>
   );
 }
